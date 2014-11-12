@@ -50,6 +50,8 @@ SPLITTERS = {"best": _tree.BestSplitter,
              "presort-best": _tree.PresortBestSplitter,
              "random": _tree.RandomSplitter}
 
+DIFFPRIVACY_MECH = {"laplace", "exponential", "leaf_laplace"}
+
 
 # =============================================================================
 # Base decision tree
@@ -567,6 +569,306 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
 
             return proba
 
+class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
+    '''
+    A Decision Tree Classifier supporting differential privacy
+
+    Parameters
+    ----------        
+
+    budget : over all budget for differential privacy
+
+    check_n_samples :   if True, check the number of samples when splitting nodes
+                        if False, it will split into a
+
+    diffprivacy_mech : laplace, exponential, leaf_laplace 
+            (1) lapace, add laplace noise when selecting features for splitting nodes
+            (2) exponential, use exponential mechanism when selecting features for splitting nodes
+            (3) leaf_lapace, after constructing the tree, add laplace noise on each leaf node
+
+
+    Attributes
+    ----------
+
+    budget_per_depth : the differential privacy budget for every depth level 
+            if budget = 1.0, max_depth = 10,
+                budget_per_depth = budget / max_depth = 0.1
+
+    '''
+
+    def __init__(self,
+            
+                 budget = 1.0,
+                 check_n_samples = True,
+                 diffprivacy_mech = "laplace",
+
+                 criterion="gini",
+                 splitter="best",
+                 random_state=None,
+
+                 max_depth=None,
+                 min_samples_split=2,
+                 min_samples_leaf=1,
+                 max_leaf_nodes=None,
+                 max_features=None
+                 ):
+
+
+        self.criterion = criterion
+        self.splitter = splitter
+        self.random_state = random_state
+
+        # parameters for diffprivacy
+        self.budget = budget
+        self.check_n_samples = check_n_samples
+        self.diffprivacy_mech = diffprivacy_mech
+
+        # criterion to determing whether to stop splitting a node
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes  # for BestSplit
+
+        self.n_features_ = None
+        self.n_outputs_ = None      # number of class features, e.g. 3
+        self.classes_ = None        # distinct values in the class feature, e.g. ['red','green','yellow',1,2, a,b,c,d]
+        self.n_classes_ = None      # number of values in the class feature, [3, 2, 4] (dtype = int)
+
+        self.max_features_ = None
+
+        # inner tree structure
+        self.tree_ = None
+
+        self.budget_per_depth_ = None
+
+
+    def format_y(self, y, n_samples):
+        '''
+            format y, 
+            set self.n_outputs_, 
+                self.classes_,
+                self.n_classes_,
+        '''
+        y = np.atleast_1d(y)
+
+        if y.ndim == 1:
+            # reshape is necessary to preserve the data contiguity against vs
+            # [:, np.newaxis] that does not.
+            y = np.reshape(y, (-1, 1))
+
+        self.n_outputs_ = y.shape[1]
+
+        y = np.copy(y)
+
+        self.classes_ = []
+        self.n_classes_ = []
+
+        for k in xrange(self.n_outputs_):
+            classes_k, y[:, k] = np.unique(y[:, k], return_inverse=True)
+            self.classes_.append(classes_k)
+            self.n_classes_.append(classes_k.shape[0])
+
+        self.n_classes_ = np.array(self.n_classes_, dtype=np.intp)
+
+        if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
+            y = np.ascontiguousarray(y, dtype=DOUBLE)
+
+        if len(y) != n_samples:
+            raise ValueError("Number of labels=%d does not match "
+                             "number of samples=%d" % (len(y), n_samples))
+
+        return y
+
+    def check_max_depth(self):
+        max_depth = ((2 ** 31) - 1 
+            if   self.max_depth is None
+            else self.max_depth)
+        # check max_depth
+        if max_depth <= 0:
+            raise ValueError("max_depth must be greater than zero. ")
+
+        return max_depth
+
+    def set_max_features_(self):
+        ''' self.max_features -> self.max_features_ '''
+        if isinstance(self.max_features, six.string_types):
+            if self.max_features == "auto":
+                max_features = max(1, int(np.sqrt(self.n_features_)))
+            elif self.max_features == "sqrt":
+                max_features = max(1, int(np.sqrt(self.n_features_)))
+            elif self.max_features == "log2":
+                max_features = max(1, int(np.log2(self.n_features_)))
+            else:
+                raise ValueError(
+                    'Invalid value for max_features. Allowed string '
+                    'values are "auto", "sqrt" or "log2".')
+        elif self.max_features is None:
+            max_features = self.n_features_
+        elif isinstance(self.max_features, (numbers.Integral, np.integer)):
+            max_features = self.max_features
+        else:  # float
+            if self.max_features > 0.0:
+                max_features = max(1, int(self.max_features * self.n_features_))
+            else:
+                max_features = 0
+
+        self.max_features_ = max_features
+
+        # check self.max_features_
+        if not (0 < self.max_features_ <= self.n_features_):
+            raise ValueError("max_features must be in (0, n_features]")
+
+    def check_max_leaf_nodes(self):
+        max_leaf_nodes = (-1 
+            if   self.max_leaf_nodes is None
+            else self.max_leaf_nodes)
+        if not isinstance(max_leaf_nodes, (numbers.Integral, np.integer)):
+            raise ValueError("max_leaf_nodes must be integral number but was "
+                             "%r" % max_leaf_nodes)
+        if -1 < max_leaf_nodes < 2:
+            raise ValueError(("max_leaf_nodes {0} must be either smaller than "
+                              "0 or larger than 1").format(max_leaf_nodes))
+
+        return max_leaf_nodes
+
+    def check_sample_weight(self, sample_weight, n_samples):
+
+        if sample_weight is not None:
+            if (getattr(sample_weight, "dtype", None) != DOUBLE or
+                    not sample_weight.flags.contiguous):
+                sample_weight = np.ascontiguousarray(
+                    sample_weight, dtype=DOUBLE)
+            if len(sample_weight.shape) > 1:
+                raise ValueError("Sample weights array has more "
+                                 "than one dimension: %d" %
+                                 len(sample_weight.shape))
+            if len(sample_weight) != n_samples:
+                raise ValueError("Number of weights=%d does not match "
+                                 "number of samples=%d" %
+                                 (len(sample_weight), n_samples))
+            return sample_weight
+
+    def set_criterion(self):
+        criterion = self.criterion
+        if not isinstance(criterion, Criterion):
+            criterion = CRITERIA_CLF[self.criterion](self.n_outputs_, self.n_classes_)
+        return criterion
+
+    def set_splitter(self, criterion, random_state):
+        splitter = self.splitter
+        if not isinstance(self.splitter, Splitter):
+            splitter = SPLITTERS[self.splitter](criterion,
+                                                self.max_features_,
+                                                self.min_samples_leaf,
+                                                random_state)
+        return splitter
+
+    def fit(self, X, y, 
+            check_input=True,
+            sample_weight=None):
+        """Build a decision tree from the training set (X, y).
+
+        Parameters
+        ----------
+        X : array-like, shape = [n_samples, n_features]
+            The training input samples. Use ``dtype=np.float32`` for maximum
+            efficiency.
+
+        y : array-like, shape = [n_samples] or [n_samples, n_outputs]
+            The target values (class labels in classification, real numbers in
+            regression). In the regression case, use ``dtype=np.float64`` and
+            ``order='C'`` for maximum efficiency.
+
+        sample_weight : array-like, shape = [n_samples] or None
+            Sample weights. If None, then samples are equally weighted. Splits
+            that would create child nodes with net zero or negative weight are
+            ignored while searching for a split in each node. In the case of
+            classification, splits are also ignored if they would result in any
+            single class carrying a negative weight in either child node.
+
+        check_input : boolean, (default=True)
+            Allow to bypass several input checking.
+            Don't use this parameter unless you know what you do.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+
+        is_classification = isinstance(self, ClassifierMixin)
+        if is_classification == False:
+            warn("Should be a classifer")
+        
+        # Check X, y
+        if check_input:
+            X, = check_arrays(X, dtype=DTYPE, sparse_format="dense") # Convert data
+
+        n_samples, self.n_features_ = X.shape
+        y = self.format_y(y, n_samples)
+
+        # Check parameters
+        random_state = check_random_state(self.random_state)
+        max_depth = self.check_max_depth()
+
+        # Set self.max_features_
+        self.set_max_features_()
+
+        if self.min_samples_leaf <= 0:
+            raise ValueError("min_samples_leaf must be greater than zero.")
+        if self.min_samples_split <= 0:
+            raise ValueError("min_samples_split must be greater than zero.")
+        # Set min_samples_split sensibly
+        min_samples_split = max(self.min_samples_split, 2 * self.min_samples_leaf)
+
+        #check max_leaf_nodes
+        max_leaf_nodes = self.check_max_leaf_nodes()
+
+        # check sample_weight 
+        sample_weight = self.check_sample_weight( sample_weight, n_samples)
+
+
+        # Differential Privacy
+
+        ## check budget >= 0
+
+        diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
+        if diffprivacy_mech == "leaf_laplace":
+            self.budget_per_depth_ = self.budget
+        else:
+            self.budget_per_depth_ = self.budget/(max_depth+1)
+
+
+        # Build tree
+        # Set criterion
+        criterion = self.set_criterion()
+
+        # Set splitter
+        splitter = self.set_splitter(criterion, random_state)
+
+
+        self.tree_ = Tree(self.n_features_, self.n_classes_, self.n_outputs_)
+
+        # DepthFirst if max_leaf_nodes is not given
+        if max_leaf_nodes < 0:
+            builder = DepthFirstTreeBuilder(splitter, 
+                                            min_samples_split,
+                                            self.min_samples_leaf, 
+                                            max_depth)
+        else: # BestFirst
+            warn("Not support BestFirstTreeBuilder")
+            # builder = BestFirstTreeBuilder(splitter, min_samples_split,
+            #                                self.min_samples_leaf, max_depth,
+            #                                max_leaf_nodes)
+
+        builder.build(self.tree_, X, y, sample_weight)
+
+        if self.n_outputs_ == 1:
+            self.n_classes_ = self.n_classes_[0]
+            self.classes_ = self.classes_[0]
+
+        return self
 
 class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     """A decision tree regressor.
