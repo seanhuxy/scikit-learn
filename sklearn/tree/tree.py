@@ -34,7 +34,8 @@ from . import _tree
 __all__ = ["DecisionTreeClassifier",
            "DecisionTreeRegressor",
            "ExtraTreeClassifier",
-           "ExtraTreeRegressor"]
+           "ExtraTreeRegressor",
+           "DiffPrivacyDecisionTreeClassifier"]
 
 
 # =============================================================================
@@ -123,6 +124,9 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self : object
             Returns self.
         """
+
+        print("from basic classifier")
+
         random_state = check_random_state(self.random_state)
 
         # Deprecations
@@ -613,7 +617,6 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
                  max_features=None
                  ):
 
-
         self.criterion = criterion
         self.splitter = splitter
         self.random_state = random_state
@@ -796,6 +799,8 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
         self : object
             Returns self.
         """
+
+        print("fitting samples using diffprivacy CART algorithm")
 
         is_classification = isinstance(self, ClassifierMixin)
         if is_classification == False:
