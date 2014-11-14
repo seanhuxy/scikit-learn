@@ -133,9 +133,11 @@ cdef class Criterion:
 
         self.children_impurity(&impurity_left, &impurity_right)
 
+        # return (impurity_right + impurity_left)
+
         return ((self.weighted_n_node_samples / self.weighted_n_samples) *
                 (impurity - self.weighted_n_right / self.weighted_n_node_samples * impurity_right
-                          - self.weighted_n_left / self.weighted_n_node_samples * impurity_left))
+                          - self.weighted_n_left  / self.weighted_n_node_samples * impurity_left))
 
 
 cdef class ClassificationCriterion(Criterion):
@@ -149,6 +151,7 @@ cdef class ClassificationCriterion(Criterion):
     def __cinit__(self, 
                   SIZE_t n_outputs,                         # the number of classes(outputs)
                   np.ndarray[SIZE_t, ndim=1] n_classes):    # number of distinct class value in every class
+        ''' Allocate space for label_count (total,left,right)'''
         # Default values
         self.y = NULL
         self.y_stride = 0
@@ -171,7 +174,7 @@ cdef class ClassificationCriterion(Criterion):
 
         # Count labels for each output
         self.n_classes = NULL
-`        safe_realloc(&self.n_classes, n_outputs)
+        safe_realloc(&self.n_classes, n_outputs)
 
         cdef SIZE_t k = 0
         cdef SIZE_t label_count_stride = 0
@@ -224,7 +227,12 @@ cdef class ClassificationCriterion(Criterion):
                    SIZE_t    start, 
                    SIZE_t    end) nogil:
         """Initialize the criterion at node samples[start:end] and
-           children samples[start:start] and samples[start:end]."""
+           children samples[start:start] and samples[start:end].
+
+           update:
+                label_count_total,(class distribution)
+                weighted_n_node_samples
+           """
         # Initialize fields
         self.y        = y
         self.y_stride = y_stride
@@ -274,7 +282,11 @@ cdef class ClassificationCriterion(Criterion):
         self.reset()
 
     cdef void reset(self) nogil:
-        """Reset the criterion at pos=start."""
+        """Reset the criterion at pos=start.
+
+        all count in label_count_left is reset to 0
+        all count in label_count_right equals to the values in label_count_total
+        """
         self.pos = self.start
 
         self.weighted_n_left = 0.0
@@ -299,7 +311,10 @@ cdef class ClassificationCriterion(Criterion):
 
     cdef void update(self, SIZE_t new_pos) nogil:
         """Update the collected statistics by moving samples[pos:new_pos] from
-            the right child to the left child."""
+            the right child to the left child.
+
+            [start:pos:end] -> [start:new_pos:end]
+        """
         cdef DOUBLE_t* y = self.y
         cdef SIZE_t y_stride = self.y_stride
         cdef DOUBLE_t* sample_weight = self.sample_weight
@@ -330,14 +345,13 @@ cdef class ClassificationCriterion(Criterion):
                 w = sample_weight[i]
 
             for k in range(n_outputs):
-                label_index = (k * label_count_stride +
-                               <SIZE_t> y[i * y_stride + k])
-                label_count_left[label_index] += w
+                label_index = (k * label_count_stride + <SIZE_t> y[i * y_stride + k])
+                label_count_left[label_index]  += w
                 label_count_right[label_index] -= w
 
             diff_w += w
 
-        self.weighted_n_left += diff_w
+        self.weighted_n_left  += diff_w
         self.weighted_n_right -= diff_w
 
         self.pos = new_pos
@@ -350,7 +364,10 @@ cdef class ClassificationCriterion(Criterion):
         pass
 
     cdef void node_value(self, double* dest) nogil:
-        """Compute the node value of samples[start:end] into dest."""
+        """Compute the node value of samples[start:end] into dest.
+
+            Copy class distribution to dest
+        """
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
@@ -397,8 +414,12 @@ cdef class Entropy(ClassificationCriterion):
             entropy = 0.0
 
             for c in range(n_classes[k]):
+                # tmp = noisy(epsilon, label_count_total[c])
                 tmp = label_count_total[c]
                 if tmp > 0.0:
+                    # noisy_total = noisy(epsilon, weighted_n_node_samples)
+                    # entropy += noisy_total*log(tmp/noisy_total)
+
                     tmp /= weighted_n_node_samples
                     entropy -= tmp * log(tmp)
 
@@ -489,8 +510,12 @@ cdef class Gini(ClassificationCriterion):
             gini = 0.0
 
             for c in range(n_classes[k]):
+                # tmp = noisy(epsilon, label_count_total[c])
                 tmp = label_count_total[c]
                 gini += tmp * tmp
+
+            # weighted_n_node_samples = noisy(epsilon, weighted_n_node_samples)
+            # gini = gini/weighted_n_node_samples
 
             gini = 1.0 - gini / (weighted_n_node_samples *
                                  weighted_n_node_samples)
@@ -961,7 +986,17 @@ cdef class Splitter:
                    np.ndarray[DTYPE_t, ndim=2] X,
                    np.ndarray[DOUBLE_t, ndim=2, mode="c"] y,
                    DOUBLE_t* sample_weight) except *:
-        """Initialize the splitter."""
+        """Initialize the splitter.
+
+            set samples 
+                n_samples
+                weighted_n_samples
+
+            set features
+                n_features
+                constant_features
+
+        """
         # Reset random state
         self.rand_r_state = self.random_state.randint(0, RAND_R_MAX)
 
@@ -1013,7 +1048,10 @@ cdef class Splitter:
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil:
-        """Reset splitter on node samples[start:end]."""
+        """Reset splitter on node samples[start:end].
+
+            Recalculate class distribution from index 'start' to 'end'
+        """
         self.start = start
         self.end   = end
 
@@ -1033,11 +1071,14 @@ cdef class Splitter:
         pass
 
     cdef void node_value(self, double* dest) nogil:
-        """Copy the value of node samples[start:end] into dest."""
+        """Copy the value of node samples[start:end] into dest.
+
+            Copy class distribution to dest
+        """
         self.criterion.node_value(dest)
 
     cdef double node_impurity(self) nogil:
-        """Copy the impurity of node samples[start:end."""
+        """Copy the impurity of node samples[start:end]."""
         return self.criterion.node_impurity()
 
 
@@ -1073,14 +1114,11 @@ cdef class BestSplitter(Splitter):
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
-        cdef SIZE_t n_visited_features = 0
-        # Number of features discovered to be constant during the split search
-        cdef SIZE_t n_found_constants = 0
-        # Number of features known to be constant and drawn without replacement
-        cdef SIZE_t n_drawn_constants = 0
+        cdef SIZE_t n_visited_features= 0
+        cdef SIZE_t n_found_constants = 0  # Number of features discovered to be constant during the split search
+        cdef SIZE_t n_drawn_constants = 0  # Number of features known to be constant and drawn without replacement
         cdef SIZE_t n_known_constants = n_constant_features[0]
-        # n_total_constants = n_known_constants + n_found_constants
-        cdef SIZE_t n_total_constants = n_known_constants
+        cdef SIZE_t n_total_constants = n_known_constants  # n_total_constants = n_known_constants + n_found_constants
         cdef DTYPE_t current_feature_value
         cdef SIZE_t partition_end
 
@@ -1095,6 +1133,26 @@ cdef class BestSplitter(Splitter):
         # for good splitting) by ancestor nodes and save the information on
         # newly discovered constant features to spare computation on descendant
         # nodes.
+
+        #  0                  n_counstant_features[0]                  n_features
+        #  +                        +                                       +
+        #  ------------------------------------------------------------------
+        #  |    |     |     |       |       |       |       |       |       |
+        #  ------------------------------------------------------------------
+        #  +                        +                                       +    
+        #  n_drawn_constants-->     n_known_constants,                  <-- f_i
+        #                           n_total_constants -->                         
+        #  
+        #  n_found_coustants = |[n_known_constants,n_total_constants]|
+        #
+
+        # Stop when
+        # (1) all the candidate features are constant, (f_i <= n_total_constants)
+        # (2) the number of features visited >= max_features 
+        #     AND 
+        #     the number of features visited > the number of *constant* features visited
+
+
         while (f_i > n_total_constants and  # Stop early if remaining features
                                             # are constant
                 (n_visited_features < max_features or
@@ -1104,22 +1162,33 @@ cdef class BestSplitter(Splitter):
             n_visited_features += 1
 
             # Loop invariant: elements of features in
-            # - [:n_drawn_constant[ holds drawn and known constant features;
-            # - [n_drawn_constant:n_known_constant[ holds known constant
-            #   features that haven't been drawn yet;
-            # - [n_known_constant:n_total_constant[ holds newly found constant
-            #   features;
-            # - [n_total_constant:f_i[ holds features that haven't been drawn
-            #   yet and aren't constant apriori.
-            # - [f_i:n_features[ holds features that have been drawn
-            #   and aren't constant.
+            # - [:n_drawn_constant] holds drawn and known constant features;
+            # - [n_drawn_constant:n_known_constant] holds known constant features that haven't been drawn yet;
+            # - [n_known_constant:n_total_constant] holds newly found constantfeatures;
+            # - [n_total_constant:f_i] holds features that haven't been drawn yet and aren't constant apriori.
+            # - [f_i:n_features] holds features that have been drawn and aren't constant.
+
+
+            #  0                  n_counstant_features[0]                  n_features
+            #  +                        +                                       +
+            #  ------------------------------------------------------------------
+            #  |    |     |     |       |       |       |       |       |       |
+            #  ------------------------------------------------------------------
+            #       +           +       +                               +    
+            #       drawn     known    total                           f_i
+            #                   +-------+                            
+            #                   | found |  
+            #                                                                      
+            #       +-------------------------------------------+-------+
+            #       |   range for random select a f_j           | found | 
+            #
 
             # Draw a feature at random
-            f_j = rand_int(f_i - n_drawn_constants - n_found_constants,
-                           random_state) + n_drawn_constants
+            f_j = rand_int(f_i - n_drawn_constants - n_found_constants, random_state) + n_drawn_constants
 
             if f_j < n_known_constants:
-                # f_j in the interval [n_drawn_constants, n_known_constants[
+                # f_j in the interval [n_drawn_constants, n_known_constants]
+                # feautre[f_j] is a constant, move to the interval [0,drawn]
                 tmp = features[f_j]
                 features[f_j] = features[n_drawn_constants]
                 features[n_drawn_constants] = tmp
@@ -1127,22 +1196,23 @@ cdef class BestSplitter(Splitter):
                 n_drawn_constants += 1
 
             else:
-                # f_j in the interval [n_known_constants, f_i - n_found_constants[
+                # f_j in the interval [n_known_constants, f_i - n_found_constants]
                 f_j += n_found_constants
-                # f_j in the interval [n_total_constants, f_i[
+                # f_j in the interval [n_total_constants, f_i]
 
                 current.feature = features[f_j]
 
-                # Sort samples along that feature; first copy the feature
-                # values for the active samples into Xf, s.t.
-                # Xf[i] == X[samples[i], j], so the sort uses the cache more
-                # effectively.
+                # Sort samples along that feature; 
+                # 1. first copy the feature values for the active samples into Xf,
+                #   s.t.
+                #       Xf[i] == X[samples[i], j], 
+                # so the sort uses the cache more effectively.
                 for p in range(start, end):
-                    Xf[p] = X[X_sample_stride * samples[p] +
-                              X_fx_stride * current.feature]
+                    Xf[p] = X[X_sample_stride*samples[p] + X_fx_stride*current.feature]
 
                 sort(Xf + start, samples + start, end - start)
 
+                # if it is constant feature
                 if Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD:
                     features[f_j] = features[n_total_constants]
                     features[n_total_constants] = current.feature
@@ -1159,8 +1229,8 @@ cdef class BestSplitter(Splitter):
                     p = start
 
                     while p < end:
-                        while (p + 1 < end and
-                               Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
+                        # if Xf[p] and Xf[p+1] is of little difference, skip evaluating Xf[p]
+                        while (p + 1 < end and Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
                             p += 1
 
                         # (p + 1 >= end) or (X[samples[p + 1], current.feature] >
@@ -1196,8 +1266,7 @@ cdef class BestSplitter(Splitter):
             p = start
 
             while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
+                if X[X_sample_stride*samples[p] + X_fx_stride*best.feature] <= best.threshold:
                     p += 1
 
                 else:
@@ -1210,12 +1279,12 @@ cdef class BestSplitter(Splitter):
         # Respect invariant for constant features: the original order of
         # element in features[:n_known_constants] must be preserved for sibling
         # and child nodes
-        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
+        memcpy(features, constant_features, sizeof(SIZE_t)*n_known_constants)
 
-        # Copy newly found constant features
+        # Copy newly found constant features to the end of `constant_features`
         memcpy(constant_features + n_known_constants,
-               features + n_known_constants,
-               sizeof(SIZE_t) * n_found_constants)
+               features          + n_known_constants,
+               sizeof(SIZE_t)*n_found_constants)
 
         # Return values
         split[0] = best
@@ -1885,6 +1954,12 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                 n_constant_features = stack_record.n_constant_features
 
                 n_node_samples = end - start
+                # DIFFPRIVACY: n_node_samples = node_samples + noisy(epsilon)
+                # since binary tree, the number of distinct values of all features is 2.
+                # is_leaf = len(candidate_features)==0 
+                #           or depth >= max_depth
+                #           or n_node_samples/(2*n_classes) < sqrt(2)/epsilon
+
                 is_leaf = ((depth >= max_depth) or
                            (n_node_samples < min_samples_split) or
                            (n_node_samples < 2 * min_samples_leaf))
@@ -1898,6 +1973,7 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                 is_leaf = is_leaf or (impurity <= MIN_IMPURITY_SPLIT)
 
                 if not is_leaf:
+                    # choose feature to split
                     splitter.node_split(impurity, &split, &n_constant_features)
                     is_leaf = is_leaf or (split.pos >= end)
 
@@ -1913,6 +1989,8 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 if is_leaf:
                     # Only store class distribution for leaf node
+
+                    # DIFFPRIVCAY: noisy count, budget = epsilon 
                     splitter.node_value(tree.value + node_id*tree.value_stride)
 
                 else:

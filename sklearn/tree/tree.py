@@ -842,10 +842,12 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         #diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
         if self.diffprivacy_mech == "leaf_laplace":
-            self.budget_per_depth_ = self.budget
-        else:
-            self.budget_per_depth_ = self.budget/(max_depth+1)
-
+            self.epsilon = self.budget
+        elif self.diffprivacy_mech == "laplace":
+            self.epsilon = self.budget/(2*(max_depth+1))
+        else: # self.diffprivacy_mech == "exponential":
+        	n_numeric_features = self.n_features_
+        	self.epsilon = self.budget/((2+n_numeric_features)*max_depth+2)	
 
         # Build tree
         # Set criterion
@@ -853,7 +855,6 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # Set splitter
         splitter = self.set_splitter(criterion, random_state)
-
 
         self.tree_ = Tree(self.n_features_, self.n_classes_, self.n_outputs_)
 
@@ -865,15 +866,12 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
                                             max_depth)
         else: # BestFirst
             warn("Not support BestFirstTreeBuilder")
-            # builder = BestFirstTreeBuilder(splitter, min_samples_split,
-            #                                self.min_samples_leaf, max_depth,
-            #                                max_leaf_nodes)
 
         builder.build(self.tree_, X, y, sample_weight)
 
         if self.n_outputs_ == 1:
             self.n_classes_ = self.n_classes_[0]
-            self.classes_ = self.classes_[0]
+            self.classes_   = self.classes_[0]
 
         return self
 
