@@ -146,8 +146,9 @@ cdef class ClassificationCriterion(Criterion):
     cdef double* label_count_right
     cdef double* label_count_total
 
-    def __cinit__(self, SIZE_t n_outputs,
-                  np.ndarray[SIZE_t, ndim=1] n_classes):
+    def __cinit__(self, 
+                  SIZE_t n_outputs,                         # the number of classes(outputs)
+                  np.ndarray[SIZE_t, ndim=1] n_classes):    # number of distinct class value in every class
         # Default values
         self.y = NULL
         self.y_stride = 0
@@ -170,14 +171,14 @@ cdef class ClassificationCriterion(Criterion):
 
         # Count labels for each output
         self.n_classes = NULL
-        safe_realloc(&self.n_classes, n_outputs)
+`        safe_realloc(&self.n_classes, n_outputs)
 
         cdef SIZE_t k = 0
         cdef SIZE_t label_count_stride = 0
 
+        # label_count_stride = max(number of distinct class value) 
         for k in range(n_outputs):
             self.n_classes[k] = n_classes[k]
-
             if n_classes[k] > label_count_stride:
                 label_count_stride = n_classes[k]
 
@@ -185,14 +186,14 @@ cdef class ClassificationCriterion(Criterion):
 
         # Allocate counters
         cdef SIZE_t n_elements = n_outputs * label_count_stride
-        self.label_count_left = <double*> calloc(n_elements, sizeof(double))
+        self.label_count_left  = <double*> calloc(n_elements, sizeof(double))
         self.label_count_right = <double*> calloc(n_elements, sizeof(double))
         self.label_count_total = <double*> calloc(n_elements, sizeof(double))
 
         # Check for allocation errors
-        if (self.label_count_left == NULL or
-                self.label_count_right == NULL or
-                self.label_count_total == NULL):
+        if (self.label_count_left  == NULL or
+            self.label_count_right == NULL or
+            self.label_count_total == NULL):
             raise MemoryError()
 
     def __dealloc__(self):
@@ -214,19 +215,24 @@ cdef class ClassificationCriterion(Criterion):
     def __setstate__(self, d):
         pass
 
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
-                   DOUBLE_t* sample_weight, double weighted_n_samples,
-                   SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
+    cdef void init(self, 
+                   DOUBLE_t* y, 
+                   SIZE_t    y_stride,
+                   DOUBLE_t* sample_weight, 
+                   double    weighted_n_samples,
+                   SIZE_t*   samples, 
+                   SIZE_t    start, 
+                   SIZE_t    end) nogil:
         """Initialize the criterion at node samples[start:end] and
            children samples[start:start] and samples[start:end]."""
         # Initialize fields
-        self.y = y
+        self.y        = y
         self.y_stride = y_stride
         self.sample_weight = sample_weight
-        self.samples = samples
-        self.start = start
-        self.end = end
-        self.n_node_samples = end - start
+        self.samples  = samples
+        self.start    = start
+        self.end      = end
+        self.n_node_samples     = end - start
         self.weighted_n_samples = weighted_n_samples
         cdef double weighted_n_node_samples = 0.0
 
@@ -243,11 +249,13 @@ cdef class ClassificationCriterion(Criterion):
         cdef DOUBLE_t w = 1.0
         cdef SIZE_t offset = 0
 
+        # set zero in the array of label_count_total 
         for k in range(n_outputs):
-            memset(label_count_total + offset, 0,
-                   n_classes[k] * sizeof(double))
+            memset(label_count_total + offset, 0, n_classes[k] * sizeof(double))
             offset += label_count_stride
 
+        # for every sample, find its class value, increase w in corresponding index of label_count_total array
+        # at the same time, update weighted_n_node_samples
         for p in range(start, end):
             i = samples[p]
 
@@ -276,18 +284,17 @@ cdef class ClassificationCriterion(Criterion):
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
         cdef double* label_count_total = self.label_count_total
-        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_left  = self.label_count_left
         cdef double* label_count_right = self.label_count_right
 
         cdef SIZE_t k = 0
 
         for k in range(n_outputs):
-            memset(label_count_left, 0, n_classes[k] * sizeof(double))
-            memcpy(label_count_right, label_count_total,
-                   n_classes[k] * sizeof(double))
+            memset(label_count_left,  0,                 n_classes[k] * sizeof(double))
+            memcpy(label_count_right, label_count_total, n_classes[k] * sizeof(double))
 
             label_count_total += label_count_stride
-            label_count_left += label_count_stride
+            label_count_left  += label_count_stride
             label_count_right += label_count_stride
 
     cdef void update(self, SIZE_t new_pos) nogil:
@@ -304,7 +311,7 @@ cdef class ClassificationCriterion(Criterion):
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
         cdef double* label_count_total = self.label_count_total
-        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_left  = self.label_count_left
         cdef double* label_count_right = self.label_count_right
 
         cdef SIZE_t i
@@ -912,8 +919,12 @@ cdef inline void _init_split(SplitRecord* self, SIZE_t start_pos) nogil:
 
 
 cdef class Splitter:
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
-                  SIZE_t min_samples_leaf, object random_state):
+    def __cinit__(self, 
+                Criterion criterion, 
+                SIZE_t max_features,
+                SIZE_t min_samples_leaf, 
+                object random_state):
+        
         self.criterion = criterion
 
         self.samples = NULL
@@ -960,8 +971,9 @@ cdef class Splitter:
 
         cdef SIZE_t i, j
         cdef double weighted_n_samples = 0.0
+        
+        # set samples (indices of the real X)
         j = 0
-
         for i in range(n_samples):
             # Only work with positively weighted samples
             if sample_weight == NULL or sample_weight[i] != 0.0:
@@ -976,7 +988,10 @@ cdef class Splitter:
         self.n_samples = j
         self.weighted_n_samples = weighted_n_samples
 
-        cdef SIZE_t n_features = X.shape[1]
+
+        # set features (indices of real features)
+        # n_features, constant_features, feature_values
+        cdef SIZE_t  n_features = X.shape[1]
         cdef SIZE_t* features = safe_realloc(&self.features, n_features)
 
         for i in range(n_features):
@@ -989,17 +1004,18 @@ cdef class Splitter:
 
         # Initialize X, y, sample_weight
         self.X = <DTYPE_t*> X.data
-        self.X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
-        self.X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        self.X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize  # stride from one sample to the next sample
+        self.X_fx_stride     = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize  # stride from one feature to the next feature, in the same sample
+        
         self.y = <DOUBLE_t*> y.data
-        self.y_stride = <SIZE_t> y.strides[0] / <SIZE_t> y.itemsize
+        self.y_stride = <SIZE_t> y.strides[0] / <SIZE_t> y.itemsize         # stride from the class value of one sample to that of next sample
         self.sample_weight = sample_weight
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil:
         """Reset splitter on node samples[start:end]."""
         self.start = start
-        self.end = end
+        self.end   = end
 
         self.criterion.init(self.y,
                             self.y_stride,
@@ -1764,33 +1780,45 @@ cdef class TreeBuilder:
 cdef class DepthFirstTreeBuilder(TreeBuilder):
     """Build a decision tree in depth-first fashion."""
 
-    def __cinit__(self, Splitter splitter, SIZE_t min_samples_split,
-                  SIZE_t min_samples_leaf, SIZE_t max_depth):
+    def __cinit__(self, 
+                    Splitter splitter, 
+                    SIZE_t min_samples_split,   
+                    SIZE_t min_samples_leaf, 
+                    SIZE_t max_depth
+                    ):
+
         self.splitter = splitter
+
+        # criterion for splitting
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
         self.max_depth = max_depth
 
-    cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
+    cpdef build(self, 
+                Tree       tree, 
+                np.ndarray X, 
+                np.ndarray y,
                 np.ndarray sample_weight=None):
+
         """Build a decision tree from the training set (X, y)."""
+        
+        ##1. Check input, X, y, sample_weight -> sample_weight_ptr
+
         # check if dtype is correct
         if X.dtype != DTYPE:
             # since we have to copy we will make it fortran for efficiency
             X = np.asfortranarray(X, dtype=DTYPE)
 
-        if y.dtype != DOUBLE or not y.flags.contiguous:
+        if y.dtype != DOUBLE or not y.flags.contiguous: # contiguous array, 
             y = np.ascontiguousarray(y, dtype=DOUBLE)
 
         cdef DOUBLE_t* sample_weight_ptr = NULL
         if sample_weight is not None:
-            if ((sample_weight.dtype != DOUBLE) or
-                    (not sample_weight.flags.contiguous)):
-                sample_weight = np.asarray(sample_weight,
-                                           dtype=DOUBLE, order="C")
+            if ((sample_weight.dtype != DOUBLE) or (not sample_weight.flags.contiguous)):
+                sample_weight = np.asarray(sample_weight, dtype=DOUBLE, order="C")
             sample_weight_ptr = <DOUBLE_t*> sample_weight.data
 
-        # Initial capacity
+        # Initial capacity of tree
         cdef int init_capacity
 
         if tree.max_depth <= 10:
@@ -1800,38 +1828,46 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
         tree._resize(init_capacity)
 
-        # Parameters
+        # Parameters, which is come from __init__()
         cdef Splitter splitter = self.splitter
-        cdef SIZE_t max_depth = self.max_depth
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
+        cdef SIZE_t max_depth  = self.max_depth
+        cdef SIZE_t min_samples_leaf  = self.min_samples_leaf
         cdef SIZE_t min_samples_split = self.min_samples_split
 
-        # Recursive partition (without actual recursion)
+        ##2. Recursive partition (without actual recursion)
         splitter.init(X, y, sample_weight_ptr)
 
+        # a StackRecord structure
         cdef SIZE_t start
         cdef SIZE_t end
         cdef SIZE_t depth
         cdef SIZE_t parent
         cdef bint is_left
-        cdef SIZE_t n_node_samples = splitter.n_samples
-        cdef double weighted_n_node_samples
-        cdef SplitRecord split
-        cdef SIZE_t node_id
-
-        cdef double threshold
         cdef double impurity = INFINITY
         cdef SIZE_t n_constant_features
-        cdef bint is_leaf
-        cdef bint first = 1
-        cdef SIZE_t max_depth_seen = -1
-        cdef int rc = 0
 
+        cdef SIZE_t n_node_samples = splitter.n_samples     # number of samples on this node
+        cdef double weighted_n_node_samples                 # number of weighted samples on this node
+        cdef SplitRecord split
+        cdef SIZE_t node_id
+        cdef double threshold
+        cdef bint is_leaf
+
+        cdef SIZE_t max_depth_seen = -1 # used to record the max depth
+        cdef bint first = 1             # only for root node, calculate init impurity
+
+        cdef int rc = 0     # return value for stack.pop
         cdef Stack stack = Stack(INITIAL_STACK_SIZE)
         cdef StackRecord stack_record
 
         # push root node onto stack
-        rc = stack.push(0, n_node_samples, 0, _TREE_UNDEFINED, 0, INFINITY, 0)
+        rc = stack.push(0,              # start index 
+                        n_node_samples, # end index
+                        0,              # depth 
+                        _TREE_UNDEFINED,# parent node id
+                        0,              # is left or right
+                        INFINITY,       # impurity
+                        0)              # number of constant features
         if rc == -1:
             # got return code -1 - out-of-memory
             raise MemoryError()
@@ -1840,12 +1876,12 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
             while not stack.is_empty():
                 stack.pop(&stack_record)
 
-                start = stack_record.start
-                end = stack_record.end
-                depth = stack_record.depth
-                parent = stack_record.parent
+                start   = stack_record.start
+                end     = stack_record.end
+                depth   = stack_record.depth
+                parent  = stack_record.parent
                 is_left = stack_record.is_left
-                impurity = stack_record.impurity
+                impurity= stack_record.impurity
                 n_constant_features = stack_record.n_constant_features
 
                 n_node_samples = end - start
@@ -1865,23 +1901,30 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                     splitter.node_split(impurity, &split, &n_constant_features)
                     is_leaf = is_leaf or (split.pos >= end)
 
-                node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
-                                         split.threshold, impurity, n_node_samples,
+                                                    # a Node structure
+                node_id = tree._add_node(parent,    # parent
+                                         is_left,   # left or right node
+                                         is_leaf,   # leaf or inner
+                                         split.feature,     # feature for split
+                                         split.threshold,   
+                                         impurity, 
+                                         n_node_samples,    
                                          weighted_n_node_samples)
 
                 if is_leaf:
-                    # Don't store value for internal nodes
-                    splitter.node_value(tree.value +
-                                        node_id * tree.value_stride)
+                    # Only store class distribution for leaf node
+                    splitter.node_value(tree.value + node_id*tree.value_stride)
 
                 else:
                     # Push right child on stack
+                    # [split.pos, end]
                     rc = stack.push(split.pos, end, depth + 1, node_id, 0,
                                     split.impurity_right, n_constant_features)
                     if rc == -1:
                         break
 
                     # Push left child on stack
+                    # [start, split.pos]
                     rc = stack.push(start, split.pos, depth + 1, node_id, 1,
                                     split.impurity_left, n_constant_features)
                     if rc == -1:
@@ -2214,8 +2257,10 @@ cdef class Tree:
         def __get__(self):
             return self._get_value_ndarray()[:self.node_count]
 
-    def __cinit__(self, int n_features, np.ndarray[SIZE_t, ndim=1] n_classes,
-                  int n_outputs):
+    def __cinit__(self, 
+                int                        n_features, 
+                np.ndarray[SIZE_t, ndim=1] n_classes,
+                int                        n_outputs):
         """Constructor."""
         # Input/Output layout
         self.n_features = n_features

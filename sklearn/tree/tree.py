@@ -836,10 +836,12 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # Differential Privacy
 
-        ## check budget >= 0
+        ## check budget > 0
+        if self.budget <= 0:
+            raise ValueError("privacy budget must be greater than zero.")
 
-        diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
-        if diffprivacy_mech == "leaf_laplace":
+        #diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
+        if self.diffprivacy_mech == "leaf_laplace":
             self.budget_per_depth_ = self.budget
         else:
             self.budget_per_depth_ = self.budget/(max_depth+1)

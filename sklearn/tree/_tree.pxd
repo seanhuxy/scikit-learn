@@ -91,11 +91,13 @@ cdef class Splitter:
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
 
     cdef SIZE_t* samples                 # Sample indices in X, y
-    cdef SIZE_t n_samples                # X.shape[0]
-    cdef double weighted_n_samples       # Weighted number of samples
+    cdef SIZE_t  n_samples               # X.shape[0]
+    cdef double  weighted_n_samples      # Weighted number of samples
+    
     cdef SIZE_t* features                # Feature indices in X
     cdef SIZE_t* constant_features       # Constant features indices
-    cdef SIZE_t n_features               # X.shape[1]
+    cdef SIZE_t  n_features              # X.shape[1]
+    
     cdef DTYPE_t* feature_values         # temp. array holding feature values
     cdef SIZE_t start                    # Start position for the current node
     cdef SIZE_t end                      # End position for the current node
@@ -177,7 +179,7 @@ cdef class Tree:
     # Methods
     cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
                           SIZE_t feature, double threshold, double impurity,
-                          SIZE_t n_node_samples,
+                          SIZE_t n_node_samples, 
                           double weighted_n_samples) nogil
     cdef void _resize(self, SIZE_t capacity)
     cdef int _resize_c(self, SIZE_t capacity=*) nogil
