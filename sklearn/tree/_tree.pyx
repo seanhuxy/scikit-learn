@@ -139,7 +139,6 @@ cdef class Criterion:
                 (impurity - self.weighted_n_right / self.weighted_n_node_samples * impurity_right
                           - self.weighted_n_left  / self.weighted_n_node_samples * impurity_left))
 
-
 cdef class ClassificationCriterion(Criterion):
     """Abstract criterion for classification."""
     cdef SIZE_t* n_classes
@@ -147,6 +146,8 @@ cdef class ClassificationCriterion(Criterion):
     cdef double* label_count_left
     cdef double* label_count_right
     cdef double* label_count_total
+
+    cdef double epsilon_per_fx
 
     def __cinit__(self, 
                   SIZE_t n_outputs,                         # the number of classes(outputs)
@@ -219,6 +220,7 @@ cdef class ClassificationCriterion(Criterion):
         pass
 
     cdef void init(self, 
+                   double    epsilon_per_fx,
                    DOUBLE_t* y, 
                    SIZE_t    y_stride,
                    DOUBLE_t* sample_weight, 
@@ -234,6 +236,7 @@ cdef class ClassificationCriterion(Criterion):
                 weighted_n_node_samples
            """
         # Initialize fields
+
         self.y        = y
         self.y_stride = y_stride
         self.sample_weight = sample_weight
@@ -243,6 +246,9 @@ cdef class ClassificationCriterion(Criterion):
         self.n_node_samples     = end - start
         self.weighted_n_samples = weighted_n_samples
         cdef double weighted_n_node_samples = 0.0
+
+        self.noisy_n_node_samples = self.n_node_samples + laplace(1.0/epsilon)
+        cdef double noisy_weighted_n_node_samples = 0.0
 
         # Initialize label_count_total and weighted_n_node_samples
         cdef SIZE_t n_outputs = self.n_outputs
@@ -273,10 +279,20 @@ cdef class ClassificationCriterion(Criterion):
             for k in range(n_outputs):
                 c = <SIZE_t> y[i * y_stride + k]
                 label_count_total[k * label_count_stride + c] += w
+                #label_count_total[k * label_count_stride + c] += w + laplace(1.0/epsilon)
 
             weighted_n_node_samples += w
+            #noisy_weighted_n_node_samples += w+laplace(1.0/epsilon)
 
         self.weighted_n_node_samples = weighted_n_node_samples
+        #self.noisy_weighted_n_node_samples = noisy_n_node_samples
+
+        # DIFFPRIVACY
+        self.epsilon_per_fx = epsilon_per_fx
+        self.epsilon_4_w_n_node_samples = self.epsilon_per_fx/(1+weighted_n_node_samples)
+        self.epsilon_4_update = self.epsilon_4_w_n_node_samples*weighted_n_node_samples
+
+        self.weighted_n_node_samples += laplace(1.0/self.epsilon_4_w_n_node_samples)
 
         # Reset to pos=start
         self.reset()
@@ -344,9 +360,12 @@ cdef class ClassificationCriterion(Criterion):
             if sample_weight != NULL:
                 w = sample_weight[i]
 
+            # DIFFPRIVACY 
+            w += laplace(1.0/(epsilon_4_update*n_outputs))
+
             for k in range(n_outputs):
                 label_index = (k * label_count_stride + <SIZE_t> y[i * y_stride + k])
-                label_count_left[label_index]  += w
+                label_count_left[label_index]  += w 
                 label_count_right[label_index] -= w
 
             diff_w += w
@@ -363,7 +382,7 @@ cdef class ClassificationCriterion(Criterion):
                                 double* impurity_right) nogil:
         pass
 
-    cdef void node_value(self, double* dest) nogil:
+    cdef void node_value(self, double epsilon, double* dest) nogil:
         """Compute the node value of samples[start:end] into dest.
 
             Copy class distribution to dest
@@ -374,11 +393,24 @@ cdef class ClassificationCriterion(Criterion):
         cdef double* label_count_total = self.label_count_total
         cdef SIZE_t k
 
+        cdef SIZE_t i
+        cdef SIZE_t zero_cnt # to count the number of zero in dest after adding laplace noise
+
         for k in range(n_outputs):
             memcpy(dest, label_count_total, n_classes[k] * sizeof(double))
+            
+            if epsilon > 0.0:
+                zero_cnt = 0
+                for i in range(n_classes[k]):
+                    dest[i] += laplace(1.0/epsilon)
+                    if dest[i] <= 0.0:
+                        dest[i] = 0.0
+                        zero_cnt += 1
+                if zero_cnt == n_classes[k]:
+                    dest[random_state.randint(0,n_classes[k])] += 1.0   # XXX random_state
+
             dest += label_count_stride
             label_count_total += label_count_stride
-
 
 cdef class Entropy(ClassificationCriterion):
     """Cross Entropy impurity criteria.
@@ -474,7 +506,6 @@ cdef class Entropy(ClassificationCriterion):
         impurity_left[0] = total_left / n_outputs
         impurity_right[0] = total_right / n_outputs
 
-
 cdef class Gini(ClassificationCriterion):
     """Gini Index impurity criteria.
 
@@ -559,375 +590,21 @@ cdef class Gini(ClassificationCriterion):
                 tmp = label_count_right[c]
                 gini_right += tmp * tmp
 
-            gini_left = 1.0 - gini_left / (weighted_n_left *
-                                           weighted_n_left)
-            gini_right = 1.0 - gini_right / (weighted_n_right *
-                                             weighted_n_right)
+            #gini_left = 1.0 - gini_left / (weighted_n_left *
+            #                               weighted_n_left)
+            #gini_right = 1.0 - gini_right / (weighted_n_right *
+            #                                 weighted_n_right)
 
-            total_left += gini_left
+            gini_left  = gini_left / weighted_n_left                   
+            gini_right = gini_right/ weighted_n_right
+                                          
+            total_left  += gini_left
             total_right += gini_right
-            label_count_left += label_count_stride
+            label_count_left  += label_count_stride
             label_count_right += label_count_stride
 
-        impurity_left[0] = total_left / n_outputs
+        impurity_left[0]  = total_left  / n_outputs
         impurity_right[0] = total_right / n_outputs
-
-
-cdef class RegressionCriterion(Criterion):
-    """Abstract criterion for regression.
-
-    Computes variance of the target values left and right of the split point.
-    Computation is linear in `n_samples` by using ::
-
-        var = \sum_i^n (y_i - y_bar) ** 2
-            = (\sum_i^n y_i ** 2) - n_samples y_bar ** 2
-    """
-    cdef double* mean_left
-    cdef double* mean_right
-    cdef double* mean_total
-    cdef double* sq_sum_left
-    cdef double* sq_sum_right
-    cdef double* sq_sum_total
-    cdef double* var_left
-    cdef double* var_right
-    cdef double* sum_left
-    cdef double* sum_right
-    cdef double* sum_total
-
-    def __cinit__(self, SIZE_t n_outputs):
-        # Default values
-        self.y = NULL
-        self.y_stride = 0
-        self.sample_weight = NULL
-
-        self.samples = NULL
-        self.start = 0
-        self.pos = 0
-        self.end = 0
-
-        self.n_outputs = n_outputs
-        self.n_node_samples = 0
-        self.weighted_n_node_samples = 0.0
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = 0.0
-
-        # Allocate accumulators. Make sure they are NULL, not uninitialized,
-        # before an exception can be raised (which triggers __dealloc__).
-        self.mean_left = NULL
-        self.mean_right = NULL
-        self.mean_total = NULL
-        self.sq_sum_left = NULL
-        self.sq_sum_right = NULL
-        self.sq_sum_total = NULL
-        self.var_left = NULL
-        self.var_right = NULL
-        self.sum_left = NULL
-        self.sum_right = NULL
-        self.sum_total = NULL
-
-        self.mean_left = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_right = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_total = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_left = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_total = <double*> calloc(n_outputs, sizeof(double))
-        self.var_left = <double*> calloc(n_outputs, sizeof(double))
-        self.var_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_left = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_total = <double*> calloc(n_outputs, sizeof(double))
-
-        if (self.mean_left == NULL or
-                self.mean_right == NULL or
-                self.mean_total == NULL or
-                self.sq_sum_left == NULL or
-                self.sq_sum_right == NULL or
-                self.sq_sum_total == NULL or
-                self.var_left == NULL or
-                self.var_right == NULL or
-                self.sum_left == NULL or
-                self.sum_right == NULL or
-                self.sum_total == NULL):
-            raise MemoryError()
-
-    def __dealloc__(self):
-        """Destructor."""
-        free(self.mean_left)
-        free(self.mean_right)
-        free(self.mean_total)
-        free(self.sq_sum_left)
-        free(self.sq_sum_right)
-        free(self.sq_sum_total)
-        free(self.var_left)
-        free(self.var_right)
-        free(self.sum_left)
-        free(self.sum_right)
-        free(self.sum_total)
-
-    def __reduce__(self):
-        return (RegressionCriterion, (self.n_outputs,), self.__getstate__())
-
-    def __getstate__(self):
-        return {}
-
-    def __setstate__(self, d):
-        pass
-
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
-                   double weighted_n_samples, SIZE_t* samples, SIZE_t start,
-                   SIZE_t end) nogil:
-        """Initialize the criterion at node samples[start:end] and
-           children samples[start:start] and samples[start:end]."""
-        # Initialize fields
-        self.y = y
-        self.y_stride = y_stride
-        self.sample_weight = sample_weight
-        self.samples = samples
-        self.start = start
-        self.end = end
-        self.n_node_samples = end - start
-        self.weighted_n_samples = weighted_n_samples
-        cdef double weighted_n_node_samples = 0.
-
-        # Initialize accumulators
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double* sum_total = self.sum_total
-
-        cdef SIZE_t i = 0
-        cdef SIZE_t p = 0
-        cdef SIZE_t k = 0
-        cdef DOUBLE_t y_ik = 0.0
-        cdef DOUBLE_t w_y_ik = 0.0
-        cdef DOUBLE_t w = 1.0
-
-        cdef SIZE_t n_bytes = n_outputs * sizeof(double)
-        memset(mean_left, 0, n_bytes)
-        memset(mean_right, 0, n_bytes)
-        memset(mean_total, 0, n_bytes)
-        memset(sq_sum_left, 0, n_bytes)
-        memset(sq_sum_right, 0, n_bytes)
-        memset(sq_sum_total, 0, n_bytes)
-        memset(var_left, 0, n_bytes)
-        memset(var_right, 0, n_bytes)
-        memset(sum_left, 0, n_bytes)
-        memset(sum_right, 0, n_bytes)
-        memset(sum_total, 0, n_bytes)
-
-        for p in range(start, end):
-            i = samples[p]
-
-            if sample_weight != NULL:
-                w = sample_weight[i]
-
-            for k in range(n_outputs):
-                y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
-                sum_total[k] += w_y_ik
-                sq_sum_total[k] += w_y_ik * y_ik
-
-            weighted_n_node_samples += w
-
-        self.weighted_n_node_samples = weighted_n_node_samples
-
-        for k in range(n_outputs):
-            mean_total[k] = sum_total[k] / weighted_n_node_samples
-
-        # Reset to pos=start
-        self.reset()
-
-    cdef void reset(self) nogil:
-        """Reset the criterion at pos=start."""
-        self.pos = self.start
-
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = self.weighted_n_node_samples
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double* sum_total = self.sum_total
-
-        cdef SIZE_t k = 0
-
-        for k in range(n_outputs):
-            mean_right[k] = mean_total[k]
-            mean_left[k] = 0.0
-            sq_sum_right[k] = sq_sum_total[k]
-            sq_sum_left[k] = 0.0
-            var_right[k] = (sq_sum_right[k] / weighted_n_node_samples -
-                            mean_right[k] * mean_right[k])
-            var_left[k] = 0.0
-            sum_right[k] = sum_total[k]
-            sum_left[k] = 0.0
-
-    cdef void update(self, SIZE_t new_pos) nogil:
-        """Update the collected statistics by moving samples[pos:new_pos] from
-           the right child to the left child."""
-        cdef DOUBLE_t* y = self.y
-        cdef SIZE_t y_stride = self.y_stride
-        cdef DOUBLE_t* sample_weight = self.sample_weight
-
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t pos = self.pos
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
-
-        cdef SIZE_t i
-        cdef SIZE_t p
-        cdef SIZE_t k
-        cdef DOUBLE_t w = 1.0
-        cdef DOUBLE_t diff_w = 0.0
-        cdef DOUBLE_t y_ik, w_y_ik
-
-        # Note: We assume start <= pos < new_pos <= end
-        for p in range(pos, new_pos):
-            i = samples[p]
-
-            if sample_weight != NULL:
-                w = sample_weight[i]
-
-            for k in range(n_outputs):
-                y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
-
-                sum_left[k] += w_y_ik
-                sum_right[k] -= w_y_ik
-
-                sq_sum_left[k] += w_y_ik * y_ik
-                sq_sum_right[k] -= w_y_ik * y_ik
-
-            diff_w += w
-
-        weighted_n_left += diff_w
-        weighted_n_right -= diff_w
-
-        for k in range(n_outputs):
-            mean_left[k] = sum_left[k] / weighted_n_left
-            mean_right[k] = sum_right[k] / weighted_n_right
-            var_left[k] = (sq_sum_left[k] / weighted_n_left -
-                           mean_left[k] * mean_left[k])
-            var_right[k] = (sq_sum_right[k] / weighted_n_right -
-                            mean_right[k] * mean_right[k])
-
-        self.weighted_n_left = weighted_n_left
-        self.weighted_n_right = weighted_n_right
-
-        self.pos = new_pos
-
-    cdef double node_impurity(self) nogil:
-        pass
-
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
-        pass
-
-    cdef void node_value(self, double* dest) nogil:
-        """Compute the node value of samples[start:end] into dest."""
-        memcpy(dest, self.mean_total, self.n_outputs * sizeof(double))
-
-
-cdef class MSE(RegressionCriterion):
-    """Mean squared error impurity criterion.
-
-        MSE = var_left + var_right
-    """
-    cdef double node_impurity(self) nogil:
-        """Evaluate the impurity of the current node, i.e. the impurity of
-           samples[start:end]."""
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* mean_total = self.mean_total
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double total = 0.0
-        cdef SIZE_t k
-
-        for k in range(n_outputs):
-            total += (sq_sum_total[k] / weighted_n_node_samples -
-                      mean_total[k] * mean_total[k])
-
-        return total / n_outputs
-
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
-        """Evaluate the impurity in children nodes, i.e. the impurity of the
-           left child (samples[start:pos]) and the impurity the right child
-           (samples[pos:end])."""
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double total_left = 0.0
-        cdef double total_right = 0.0
-        cdef SIZE_t k
-
-        for k in range(n_outputs):
-            total_left += var_left[k]
-            total_right += var_right[k]
-
-        impurity_left[0] = total_left / n_outputs
-        impurity_right[0] = total_right / n_outputs
-
-
-cdef class FriedmanMSE(MSE):
-    """Mean squared error impurity criterion with improvement score by Friedman
-
-    Uses the formula (35) in Friedmans original Gradient Boosting paper:
-
-        diff = mean_left - mean_right
-        improvement = n_left * n_right * diff^2 / (n_left + n_right)
-    """
-
-    cdef double impurity_improvement(self, double impurity) nogil:
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t k
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double total_sum_left = 0.0
-        cdef double total_sum_right = 0.0
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
-        cdef double diff = 0.0
-
-        for k from 0 <= k < n_outputs:
-            total_sum_left += sum_left[k]
-            total_sum_right += sum_right[k]
-
-        total_sum_left = total_sum_left / n_outputs
-        total_sum_right = total_sum_right / n_outputs
-        diff = ((total_sum_left / weighted_n_left) -
-                (total_sum_right / weighted_n_right))
-
-        return (weighted_n_left * weighted_n_right * diff * diff /
-                (weighted_n_left + weighted_n_right))
 
 
 # =============================================================================
@@ -954,6 +631,7 @@ cdef class Splitter:
 
         self.samples = NULL
         self.n_samples = 0
+        #self.weighted_n_samples = 0.0 
         self.features = NULL
         self.n_features = 0
         self.feature_values = NULL
@@ -1070,12 +748,11 @@ cdef class Splitter:
         """Find a split on node samples[start:end]."""
         pass
 
-    cdef void node_value(self, double* dest) nogil:
+    cdef void node_value(self, epsilon, double* dest) nogil:
         """Copy the value of node samples[start:end] into dest.
-
-            Copy class distribution to dest
+           Copy class distribution to dest
         """
-        self.criterion.node_value(dest)
+        self.criterion.node_value(epsilon, dest)
 
     cdef double node_impurity(self) nogil:
         """Copy the impurity of node samples[start:end]."""
@@ -1090,7 +767,58 @@ cdef class BestSplitter(Splitter):
                                self.min_samples_leaf,
                                self.random_state), self.__getstate__())
 
-    cdef void node_split(self, double impurity, SplitRecord* split,
+    cdef void _choose_best_split_point(self, double epsilon, DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
+        '''Give a feature, find the best split point'''
+        
+        cdef SplitRecord best
+        _init_split(&best, end)
+
+        # Reset [start,pos,end] to [start,start,end]
+        self.criterion.reset()      
+
+        p = start
+        while p < end:
+            # if Xf[p] and Xf[p+1] is of little difference, skip evaluating Xf[p]
+            while (p + 1 < end and Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
+                p += 1
+
+            # (p + 1 >= end) or (X[samples[p + 1], current.feature] >
+            #                    X[samples[p], current.feature])
+            p += 1
+            # (p >= end) or (X[samples[p], current.feature] >
+            #                X[samples[p - 1], current.feature])
+
+            if p < end:
+                current.pos = p
+
+                # Reject if min_samples_leaf is not guaranteed
+                if (((current.pos - start) < min_samples_leaf) or
+                        ((end - current.pos) < min_samples_leaf)):
+                    continue
+
+                # move sample [start,pos,end] to range[start,new_pos,end]
+                self.criterion.update(current.pos)
+                current.improvement = self.criterion.impurity_improvement(impurity)
+
+                if current.improvement > feature_best.improvement:
+                    self.criterion.children_impurity(&current.impurity_left,
+                                                     &current.impurity_right)
+                    current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
+
+                    if current.threshold == Xf[p]:
+                        current.threshold = Xf[p - 1]
+
+                    best = current  # copy
+
+                    split[0] = best
+
+    cdef void _exp_choose_best_split_point(self, double epsilon, DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
+        '''Give a feature, using exponential mechanism to find the best split point'''
+        pass
+
+    cdef void node_split(self, 
+                         double epsilon,
+                         double impurity, SplitRecord* split,
                          SIZE_t* n_constant_features) nogil:
         """Find the best split on node samples[start:end]."""
         # Find the best split
@@ -1111,6 +839,7 @@ cdef class BestSplitter(Splitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
+        cdef SplitRecord feature_best
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -1122,7 +851,13 @@ cdef class BestSplitter(Splitter):
         cdef DTYPE_t current_feature_value
         cdef SIZE_t partition_end
 
+        # DIFFPRIVACY
+        cdef epsilon_per_fx = epsilon / (max_features+1)
+
         _init_split(&best, end)
+        feature_best  = <SplitRecord*> calloc(self.n_features, sizeof(SplitRecord)) # free after using
+        for i in range(0, self.n_features):
+            _init_split(&feature_best[i], end)
 
         # Sample up to max_features without replacement using a
         # Fisher-Yates-based algorithm (using the local variables `f_i` and
@@ -1220,45 +955,20 @@ cdef class BestSplitter(Splitter):
                     n_found_constants += 1
                     n_total_constants += 1
 
-                else:
+                else: # feature f_j
                     f_i -= 1
                     features[f_i], features[f_j] = features[f_j], features[f_i]
 
-                    # Evaluate all splits
-                    self.criterion.reset()
-                    p = start
 
-                    while p < end:
-                        # if Xf[p] and Xf[p+1] is of little difference, skip evaluating Xf[p]
-                        while (p + 1 < end and Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
-                            p += 1
+                    #self._choose_best_split_point(Xf, start, end, current, &feature_best[f_i])
+                    self._lap_choose_best_split_point(epsilon, Xf, start, end, current, &feature_best[f_i])
+                    #self._exp_choose_best_split_point(epsilon, Xf, start, end, current, &feature_best[f_i])    
 
-                        # (p + 1 >= end) or (X[samples[p + 1], current.feature] >
-                        #                    X[samples[p], current.feature])
-                        p += 1
-                        # (p >= end) or (X[samples[p], current.feature] >
-                        #                X[samples[p - 1], current.feature])
+                    if features_best[f_i].improvement > best.improvement
+                        best = feature_best[f_i]
 
-                        if p < end:
-                            current.pos = p
-
-                            # Reject if min_samples_leaf is not guaranteed
-                            if (((current.pos - start) < min_samples_leaf) or
-                                    ((end - current.pos) < min_samples_leaf)):
-                                continue
-
-                            self.criterion.update(current.pos)
-                            current.improvement = self.criterion.impurity_improvement(impurity)
-
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
-                                current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
-
-                                if current.threshold == Xf[p]:
-                                    current.threshold = Xf[p - 1]
-
-                                best = current  # copy
+        # exponential mechanism
+        # self._exp_choose_split_feature(epsilon, features_best, self.n_features, &best)
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
         if best.pos < end:
@@ -1401,437 +1111,6 @@ cdef void heapsort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil:
         end = end - 1
 
 
-cdef class RandomSplitter(Splitter):
-    """Splitter for finding the best random split."""
-    def __reduce__(self):
-        return (RandomSplitter, (self.criterion,
-                                 self.max_features,
-                                 self.min_samples_leaf,
-                                 self.random_state), self.__getstate__())
-
-    cdef void node_split(self, double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil:
-        """Find the best random split on node samples[start:end]."""
-        # Draw random splits and pick the best
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t start = self.start
-        cdef SIZE_t end = self.end
-
-        cdef SIZE_t* features = self.features
-        cdef SIZE_t* constant_features = self.constant_features
-        cdef SIZE_t n_features = self.n_features
-
-        cdef DTYPE_t* X = self.X
-        cdef DTYPE_t* Xf = self.feature_values
-        cdef SIZE_t X_sample_stride = self.X_sample_stride
-        cdef SIZE_t X_fx_stride = self.X_fx_stride
-        cdef SIZE_t max_features = self.max_features
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef UINT32_t* random_state = &self.rand_r_state
-
-        cdef SplitRecord best, current
-
-        cdef SIZE_t f_i = n_features
-        cdef SIZE_t f_j, p, tmp
-        # Number of features discovered to be constant during the split search
-        cdef SIZE_t n_found_constants = 0
-        # Number of features known to be constant and drawn without replacement
-        cdef SIZE_t n_drawn_constants = 0
-        cdef SIZE_t n_known_constants = n_constant_features[0]
-        # n_total_constants = n_known_constants + n_found_constants
-        cdef SIZE_t n_total_constants = n_known_constants
-        cdef SIZE_t n_visited_features = 0
-        cdef DTYPE_t min_feature_value
-        cdef DTYPE_t max_feature_value
-        cdef DTYPE_t current_feature_value
-        cdef SIZE_t partition_end
-
-        _init_split(&best, end)
-
-        # Sample up to max_features without replacement using a
-        # Fisher-Yates-based algorithm (using the local variables `f_i` and
-        # `f_j` to compute a permutation of the `features` array).
-        #
-        # Skip the CPU intensive evaluation of the impurity criterion for
-        # features that were already detected as constant (hence not suitable
-        # for good splitting) by ancestor nodes and save the information on
-        # newly discovered constant features to spare computation on descendant
-        # nodes.
-        while (f_i > n_total_constants and  # Stop early if remaining features
-                                            # are constant
-                (n_visited_features < max_features or
-                 # At least one drawn features must be non constant
-                 n_visited_features <= n_found_constants + n_drawn_constants)):
-            n_visited_features += 1
-
-            # Loop invariant: elements of features in
-            # - [:n_drawn_constant[ holds drawn and known constant features;
-            # - [n_drawn_constant:n_known_constant[ holds known constant
-            #   features that haven't been drawn yet;
-            # - [n_known_constant:n_total_constant[ holds newly found constant
-            #   features;
-            # - [n_total_constant:f_i[ holds features that haven't been drawn
-            #   yet and aren't constant apriori.
-            # - [f_i:n_features[ holds features that have been drawn
-            #   and aren't constant.
-
-            # Draw a feature at random
-            f_j = rand_int(f_i - n_drawn_constants - n_found_constants,
-                           random_state) + n_drawn_constants
-
-            if f_j < n_known_constants:
-                # f_j in the interval [n_drawn_constants, n_known_constants[
-                tmp = features[f_j]
-                features[f_j] = features[n_drawn_constants]
-                features[n_drawn_constants] = tmp
-
-                n_drawn_constants += 1
-
-            else:
-                # f_j in the interval [n_known_constants, f_i - n_found_constants[
-                f_j += n_found_constants
-                # f_j in the interval [n_total_constants, f_i[
-
-                current.feature = features[f_j]
-
-                # Find min, max
-                min_feature_value = X[X_sample_stride * samples[start] +
-                                      X_fx_stride * current.feature]
-                max_feature_value = min_feature_value
-                Xf[start] = min_feature_value
-
-                for p in range(start + 1, end):
-                    current_feature_value = X[X_sample_stride * samples[p] +
-                                              X_fx_stride * current.feature]
-                    Xf[p] = current_feature_value
-
-                    if current_feature_value < min_feature_value:
-                        min_feature_value = current_feature_value
-                    elif current_feature_value > max_feature_value:
-                        max_feature_value = current_feature_value
-
-                if max_feature_value <= min_feature_value + FEATURE_THRESHOLD:
-                    features[f_j] = features[n_total_constants]
-                    features[n_total_constants] = current.feature
-
-                    n_found_constants += 1
-                    n_total_constants += 1
-
-                else:
-                    f_i -= 1
-                    features[f_i], features[f_j] = features[f_j], features[f_i]
-
-                    # Draw a random threshold
-                    current.threshold = (min_feature_value +
-                                         rand_double(random_state) *
-                                         (max_feature_value -
-                                          min_feature_value))
-
-                    if current.threshold == max_feature_value:
-                        current.threshold = min_feature_value
-
-                    # Partition
-                    partition_end = end
-                    p = start
-                    while p < partition_end:
-                        current_feature_value = Xf[p]
-                        if current_feature_value <= current.threshold:
-                            p += 1
-                        else:
-                            partition_end -= 1
-
-                            Xf[p] = Xf[partition_end]
-                            Xf[partition_end] = current_feature_value
-
-                            tmp = samples[partition_end]
-                            samples[partition_end] = samples[p]
-                            samples[p] = tmp
-
-                    current.pos = partition_end
-
-                    # Reject if min_samples_leaf is not guaranteed
-                    if (((current.pos - start) < min_samples_leaf) or
-                            ((end - current.pos) < min_samples_leaf)):
-                        continue
-
-                    # Evaluate split
-                    self.criterion.reset()
-                    self.criterion.update(current.pos)
-                    current.improvement = self.criterion.impurity_improvement(impurity)
-
-                    if current.improvement > best.improvement:
-                        self.criterion.children_impurity(&current.impurity_left,
-                                                         &current.impurity_right)
-                        best = current  # copy
-
-        # Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end and current.feature != best.feature:
-            partition_end = end
-            p = start
-
-            while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
-                    p += 1
-
-                else:
-                    partition_end -= 1
-
-                    tmp = samples[partition_end]
-                    samples[partition_end] = samples[p]
-                    samples[p] = tmp
-
-        # Respect invariant for constant features: the original order of
-        # element in features[:n_known_constants] must be preserved for sibling
-        # and child nodes
-        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
-
-        # Copy newly found constant features
-        memcpy(constant_features + n_known_constants,
-               features + n_known_constants,
-               sizeof(SIZE_t) * n_found_constants)
-
-        # Return values
-        split[0] = best
-        n_constant_features[0] = n_total_constants
-
-
-cdef class PresortBestSplitter(Splitter):
-    """Splitter for finding the best split, using presorting."""
-    cdef DTYPE_t* X_old
-    cdef np.ndarray X_argsorted
-    cdef INT32_t* X_argsorted_ptr
-    cdef SIZE_t X_argsorted_stride
-
-    cdef SIZE_t n_total_samples
-    cdef unsigned char* sample_mask
-
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
-                  SIZE_t min_samples_leaf, object random_state):
-        # Initialize pointers
-        self.X_old = NULL
-        self.X_argsorted_ptr = NULL
-        self.X_argsorted_stride = 0
-        self.sample_mask = NULL
-
-    def __dealloc__(self):
-        """Destructor."""
-        free(self.sample_mask)
-
-    def __reduce__(self):
-        return (PresortBestSplitter, (self.criterion,
-                                      self.max_features,
-                                      self.min_samples_leaf,
-                                      self.random_state), self.__getstate__())
-
-    cdef void init(self,
-                   np.ndarray[DTYPE_t, ndim=2] X,
-                   np.ndarray[DOUBLE_t, ndim=2, mode="c"] y,
-                   DOUBLE_t* sample_weight):
-        cdef void* sample_mask = NULL
-
-        # Call parent initializer
-        Splitter.init(self, X, y, sample_weight)
-
-        # Pre-sort X
-        if self.X_old != self.X:
-            self.X_old = self.X
-            self.X_argsorted = np.asfortranarray(np.argsort(X, axis=0),
-                                                 dtype=np.int32)
-            self.X_argsorted_ptr = <INT32_t*> self.X_argsorted.data
-            self.X_argsorted_stride = (<SIZE_t> self.X_argsorted.strides[1] /
-                                       <SIZE_t> self.X_argsorted.itemsize)
-
-            self.n_total_samples = X.shape[0]
-            sample_mask = safe_realloc(&self.sample_mask, self.n_total_samples)
-            memset(sample_mask, 0, self.n_total_samples)
-
-    cdef void node_split(self, double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil:
-        """Find the best split on node samples[start:end]."""
-        # Find the best split
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t start = self.start
-        cdef SIZE_t end = self.end
-
-        cdef SIZE_t* features = self.features
-        cdef SIZE_t* constant_features = self.constant_features
-        cdef SIZE_t n_features = self.n_features
-
-        cdef DTYPE_t* X = self.X
-        cdef DTYPE_t* Xf = self.feature_values
-        cdef SIZE_t X_sample_stride = self.X_sample_stride
-        cdef SIZE_t X_fx_stride = self.X_fx_stride
-        cdef INT32_t* X_argsorted = self.X_argsorted_ptr
-        cdef SIZE_t X_argsorted_stride = self.X_argsorted_stride
-        cdef SIZE_t n_total_samples = self.n_total_samples
-        cdef unsigned char* sample_mask = self.sample_mask
-
-        cdef SIZE_t max_features = self.max_features
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef UINT32_t* random_state = &self.rand_r_state
-
-        cdef SplitRecord best, current
-
-        cdef SIZE_t f_i = n_features
-        cdef SIZE_t f_j, p
-        # Number of features discovered to be constant during the split search
-        cdef SIZE_t n_found_constants = 0
-        # Number of features known to be constant and drawn without replacement
-        cdef SIZE_t n_drawn_constants = 0
-        cdef SIZE_t n_known_constants = n_constant_features[0]
-        # n_total_constants = n_known_constants + n_found_constants
-        cdef SIZE_t n_total_constants = n_known_constants
-        cdef SIZE_t n_visited_features = 0
-        cdef SIZE_t partition_end
-        cdef SIZE_t i, j
-
-        _init_split(&best, end)
-
-        # Set sample mask
-        for p in range(start, end):
-            sample_mask[samples[p]] = 1
-
-        # Sample up to max_features without replacement using a
-        # Fisher-Yates-based algorithm (using the local variables `f_i` and
-        # `f_j` to compute a permutation of the `features` array).
-        #
-        # Skip the CPU intensive evaluation of the impurity criterion for
-        # features that were already detected as constant (hence not suitable
-        # for good splitting) by ancestor nodes and save the information on
-        # newly discovered constant features to spare computation on descendant
-        # nodes.
-        while (f_i > n_total_constants and  # Stop early if remaining features
-                                            # are constant
-                (n_visited_features < max_features or
-                 # At least one drawn features must be non constant
-                 n_visited_features <= n_found_constants + n_drawn_constants)):
-            n_visited_features += 1
-
-            # Loop invariant: elements of features in
-            # - [:n_drawn_constant[ holds drawn and known constant features;
-            # - [n_drawn_constant:n_known_constant[ holds known constant
-            #   features that haven't been drawn yet;
-            # - [n_known_constant:n_total_constant[ holds newly found constant
-            #   features;
-            # - [n_total_constant:f_i[ holds features that haven't been drawn
-            #   yet and aren't constant apriori.
-            # - [f_i:n_features[ holds features that have been drawn
-            #   and aren't constant.
-
-            # Draw a feature at random
-            f_j = rand_int(f_i - n_drawn_constants - n_found_constants,
-                           random_state) + n_drawn_constants
-
-            if f_j < n_known_constants:
-                # f_j is in [n_drawn_constants, n_known_constants[
-                tmp = features[f_j]
-                features[f_j] = features[n_drawn_constants]
-                features[n_drawn_constants] = tmp
-
-                n_drawn_constants += 1
-
-            else:
-                # f_j in the interval [n_known_constants, f_i - n_found_constants[
-                f_j += n_found_constants
-                # f_j in the interval [n_total_constants, f_i[
-
-                current.feature = features[f_j]
-
-                # Extract ordering from X_argsorted
-                p = start
-
-                for i in range(n_total_samples):
-                    j = X_argsorted[X_argsorted_stride * current.feature + i]
-                    if sample_mask[j] == 1:
-                        samples[p] = j
-                        Xf[p] = X[X_sample_stride * j +
-                                  X_fx_stride * current.feature]
-                        p += 1
-
-                # Evaluate all splits
-                if Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD:
-                    features[f_j] = features[n_total_constants]
-                    features[n_total_constants] = current.feature
-
-                    n_found_constants += 1
-                    n_total_constants += 1
-
-                else:
-                    f_i -= 1
-                    features[f_i], features[f_j] = features[f_j], features[f_i]
-
-                    self.criterion.reset()
-                    p = start
-
-                    while p < end:
-                        while (p + 1 < end and
-                               Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
-                            p += 1
-
-                        # (p + 1 >= end) or (X[samples[p + 1], current.feature] >
-                        #                    X[samples[p], current.feature])
-                        p += 1
-                        # (p >= end) or (X[samples[p], current.feature] >
-                        #                X[samples[p - 1], current.feature])
-
-                        if p < end:
-                            current.pos = p
-
-                            # Reject if min_samples_leaf is not guaranteed
-                            if (((current.pos - start) < min_samples_leaf) or
-                                    ((end - current.pos) < min_samples_leaf)):
-                                continue
-
-                            self.criterion.update(current.pos)
-                            current.improvement = self.criterion.impurity_improvement(impurity)
-
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
-
-                                current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
-                                if current.threshold == Xf[p]:
-                                    current.threshold = Xf[p - 1]
-
-                                best = current  # copy
-
-        # Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end:
-            partition_end = end
-            p = start
-
-            while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
-                    p += 1
-
-                else:
-                    partition_end -= 1
-
-                    tmp = samples[partition_end]
-                    samples[partition_end] = samples[p]
-                    samples[p] = tmp
-
-        # Reset sample mask
-        for p in range(start, end):
-            sample_mask[samples[p]] = 0
-
-        # Respect invariant for constant features: the original order of
-        # element in features[:n_known_constants] must be preserved for sibling
-        # and child nodes
-        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
-
-        # Copy newly found constant features
-        memcpy(constant_features + n_known_constants,
-               features + n_known_constants,
-               sizeof(SIZE_t) * n_found_constants)
-
-        # Return values
-        split[0] = best
-        n_constant_features[0] = n_total_constants
-
-
 # =============================================================================
 # Tree builders
 # =============================================================================
@@ -1850,10 +1129,14 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
     """Build a decision tree in depth-first fashion."""
 
     def __cinit__(self, 
-                    Splitter splitter, 
+                    Splitter splitter,
+
                     SIZE_t min_samples_split,   
                     SIZE_t min_samples_leaf, 
-                    SIZE_t max_depth
+                    SIZE_t max_depth,
+
+                    int diffprivacy,        # 0=no, 1=lap, 2=exp
+                    double budget
                     ):
 
         self.splitter = splitter
@@ -1862,6 +1145,9 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
         self.max_depth = max_depth
+
+        self.diffprivacy = diffprivacy
+        self.budget      = budget
 
     cpdef build(self, 
                 Tree       tree, 
@@ -1902,6 +1188,17 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         cdef SIZE_t max_depth  = self.max_depth
         cdef SIZE_t min_samples_leaf  = self.min_samples_leaf
         cdef SIZE_t min_samples_split = self.min_samples_split
+
+
+        # DIFFPRIVACY 
+        cdef double epsilon_per_action
+        if self.diffprivacy > 0:
+            self.epsilon_per_depth = self.budget/(self.max_depth+1)
+            if self.diffprivacy == 1:
+                epsilon_per_action = self.epsilon_per_depth/2.0
+        else:
+            self.epsilon_per_depth = -1.0
+            epsilon_per_action = -1.0
 
         ##2. Recursive partition (without actual recursion)
         splitter.init(X, y, sample_weight_ptr)
@@ -1954,16 +1251,20 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                 n_constant_features = stack_record.n_constant_features
 
                 n_node_samples = end - start
+
                 # DIFFPRIVACY: n_node_samples = node_samples + noisy(epsilon)
                 # since binary tree, the number of distinct values of all features is 2.
-                # is_leaf = len(candidate_features)==0 
-                #           or depth >= max_depth
-                #           or n_node_samples/(2*n_classes) < sqrt(2)/epsilon
 
-                is_leaf = ((depth >= max_depth) or
-                           (n_node_samples < min_samples_split) or
-                           (n_node_samples < 2 * min_samples_leaf))
+                noisy_n_node_samples = n_node_samples + laplace(1.0/epsilon_per_action)
+                is_leaf = len(candidate_features)==0 
+                           or depth >= max_depth
+                           or noisy_n_node_samples/(2*n_classes) < sqrt(2)/epsilon
 
+                #is_leaf = ((depth >= max_depth) or
+                #           (n_node_samples < min_samples_split) or
+                #           (n_node_samples < 2 * min_samples_leaf))
+
+                # DIFFPRIVACY add noisy to n_node_samples, class distributions
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
                 if first:
@@ -1974,7 +1275,8 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 if not is_leaf:
                     # choose feature to split
-                    splitter.node_split(impurity, &split, &n_constant_features)
+                    # DIFFPRIVACY epsilon = ?
+                    splitter.node_split(epsilon_per_action, impurity, &split, &n_constant_features)
                     is_leaf = is_leaf or (split.pos >= end)
 
                                                     # a Node structure
@@ -1989,9 +1291,9 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 if is_leaf:
                     # Only store class distribution for leaf node
-
-                    # DIFFPRIVCAY: noisy count, budget = epsilon 
-                    splitter.node_value(tree.value + node_id*tree.value_stride)
+                    
+                    # DIFFPRIVCAY: noisy count, budget = epsilon_per_action 
+                    splitter.node_value( epsilon_per_action ,tree.value + node_id*tree.value_stride)
 
                 else:
                     # Push right child on stack
@@ -2019,221 +1321,6 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
         if rc == -1:
             raise MemoryError()
-
-
-# Best first builder ----------------------------------------------------------
-
-cdef inline int _add_to_frontier(PriorityHeapRecord* rec,
-                                 PriorityHeap frontier) nogil:
-    """Adds record ``rec`` to the priority queue ``frontier``; returns -1
-    on memory-error. """
-    return frontier.push(rec.node_id, rec.start, rec.end, rec.pos, rec.depth,
-                         rec.is_leaf, rec.improvement, rec.impurity,
-                         rec.impurity_left, rec.impurity_right)
-
-
-cdef class BestFirstTreeBuilder(TreeBuilder):
-    """Build a decision tree in best-first fashion.
-
-    The best node to expand is given by the node at the frontier that has the
-    highest impurity improvement.
-
-    NOTE: this TreeBuilder will ignore ``tree.max_depth`` .
-    """
-    cdef SIZE_t max_leaf_nodes
-
-    def __cinit__(self, Splitter splitter, SIZE_t min_samples_split,
-                  SIZE_t min_samples_leaf, SIZE_t max_depth,
-                  SIZE_t max_leaf_nodes):
-        self.splitter = splitter
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.max_depth = max_depth
-        self.max_leaf_nodes = max_leaf_nodes
-
-    cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
-                np.ndarray sample_weight=None):
-        """Build a decision tree from the training set (X, y)."""
-        # Check if dtype is correct
-        if X.dtype != DTYPE:
-            # since we have to copy we will make it fortran for efficiency
-            X = np.asfortranarray(X, dtype=DTYPE)
-
-        if y.dtype != DOUBLE or not y.flags.contiguous:
-            y = np.ascontiguousarray(y, dtype=DOUBLE)
-
-        cdef DOUBLE_t* sample_weight_ptr = NULL
-        if sample_weight is not None:
-            if ((sample_weight.dtype != DOUBLE) or
-                    (not sample_weight.flags.contiguous)):
-                sample_weight = np.asarray(sample_weight,
-                                           dtype=DOUBLE, order="C")
-            sample_weight_ptr = <DOUBLE_t*> sample_weight.data
-
-        # Parameters
-        cdef Splitter splitter = self.splitter
-        cdef SIZE_t max_leaf_nodes = self.max_leaf_nodes
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef SIZE_t min_samples_split = self.min_samples_split
-
-        # Recursive partition (without actual recursion)
-        splitter.init(X, y, sample_weight_ptr)
-
-        cdef PriorityHeap frontier = PriorityHeap(INITIAL_STACK_SIZE)
-        cdef PriorityHeapRecord record
-        cdef PriorityHeapRecord split_node_left
-        cdef PriorityHeapRecord split_node_right
-
-        cdef SIZE_t n_node_samples = splitter.n_samples
-        cdef int max_split_nodes = max_leaf_nodes - 1
-        cdef bint is_leaf
-        cdef SIZE_t max_depth_seen = -1
-        cdef int rc = 0
-        cdef Node* node
-
-        # Initial capacity
-        cdef int init_capacity = max_split_nodes + max_leaf_nodes
-        tree._resize(init_capacity)
-
-        with nogil:
-            # add root to frontier
-            rc = self._add_split_node(splitter, tree, 0, n_node_samples,
-                                      INFINITY, IS_FIRST, IS_LEFT, NULL, 0,
-                                      &split_node_left)
-            if rc >= 0:
-                rc = _add_to_frontier(&split_node_left, frontier)
-        if rc == -1:
-            raise MemoryError()
-
-        with nogil:
-            while not frontier.is_empty():
-                frontier.pop(&record)
-
-                node = &tree.nodes[record.node_id]
-                is_leaf = (record.is_leaf or max_split_nodes <= 0)
-
-                if is_leaf:
-                    # Node is not expandable; set node as leaf
-                    node.left_child = _TREE_LEAF
-                    node.right_child = _TREE_LEAF
-                    node.feature = _TREE_UNDEFINED
-                    node.threshold = _TREE_UNDEFINED
-
-                else:
-                    # Node is expandable
-
-                    # Decrement number of split nodes available
-                    max_split_nodes -= 1
-
-                    # Compute left split node
-                    rc = self._add_split_node(splitter, tree,
-                                              record.start, record.pos,
-                                              record.impurity_left,
-                                              IS_NOT_FIRST, IS_LEFT, node,
-                                              record.depth + 1,
-                                              &split_node_left)
-                    if rc == -1:
-                        break
-
-                    # tree.nodes may have changed
-                    node = &tree.nodes[record.node_id]
-
-                    # Compute right split node
-                    rc = self._add_split_node(splitter, tree, record.pos,
-                                              record.end,
-                                              record.impurity_right,
-                                              IS_NOT_FIRST, IS_NOT_LEFT, node,
-                                              record.depth + 1,
-                                              &split_node_right)
-                    if rc == -1:
-                        break
-
-                    # Add nodes to queue
-                    rc = _add_to_frontier(&split_node_left, frontier)
-                    if rc == -1:
-                        break
-
-                    rc = _add_to_frontier(&split_node_right, frontier)
-                    if rc == -1:
-                        break
-
-                if record.depth > max_depth_seen:
-                    max_depth_seen = record.depth
-
-            if rc >= 0:
-                rc = tree._resize_c(tree.node_count)
-
-            if rc >= 0:
-                tree.max_depth = max_depth_seen
-
-        if rc == -1:
-            raise MemoryError()
-
-    cdef inline int _add_split_node(self, Splitter splitter, Tree tree,
-                                    SIZE_t start, SIZE_t end, double impurity,
-                                    bint is_first, bint is_left, Node* parent,
-                                    SIZE_t depth,
-                                    PriorityHeapRecord* res) nogil:
-        """Adds node w/ partition ``[start, end)`` to the frontier. """
-        cdef SplitRecord split
-        cdef SIZE_t node_id
-        cdef SIZE_t n_node_samples
-        cdef SIZE_t n_constant_features = 0
-        cdef double weighted_n_node_samples
-        cdef bint is_leaf
-        cdef SIZE_t n_left, n_right
-        cdef double imp_diff
-
-        splitter.node_reset(start, end, &weighted_n_node_samples)
-
-        if is_first:
-            impurity = splitter.node_impurity()
-
-        n_node_samples = end - start
-        is_leaf = ((depth > self.max_depth) or
-                   (n_node_samples < self.min_samples_split) or
-                   (n_node_samples < 2 * self.min_samples_leaf) or
-                   (impurity <= MIN_IMPURITY_SPLIT))
-
-        if not is_leaf:
-            splitter.node_split(impurity, &split, &n_constant_features)
-            is_leaf = is_leaf or (split.pos >= end)
-
-        node_id = tree._add_node(parent - tree.nodes
-                                 if parent != NULL
-                                 else _TREE_UNDEFINED,
-                                 is_left, is_leaf,
-                                 split.feature, split.threshold, impurity, n_node_samples,
-                                 weighted_n_node_samples)
-        if node_id == <SIZE_t>(-1):
-            return -1
-
-        # compute values also for split nodes (might become leafs later).
-        splitter.node_value(tree.value + node_id * tree.value_stride)
-
-        res.node_id = node_id
-        res.start = start
-        res.end = end
-        res.depth = depth
-        res.impurity = impurity
-
-        if not is_leaf:
-            # is split node
-            res.pos = split.pos
-            res.is_leaf = 0
-            res.improvement = split.improvement
-            res.impurity_left = split.impurity_left
-            res.impurity_right = split.impurity_right
-
-        else:
-            # is leaf => 0 improvement
-            res.pos = end
-            res.is_leaf = 1
-            res.improvement = 0.0
-            res.impurity_left = impurity
-            res.impurity_right = impurity
-
-        return 0
 
 
 # =============================================================================

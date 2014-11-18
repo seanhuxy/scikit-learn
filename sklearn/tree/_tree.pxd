@@ -56,7 +56,9 @@ cdef class Criterion:
     cdef double node_impurity(self) nogil
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil
-    cdef void node_value(self, double* dest) nogil
+    #cdef void node_value(self, double* dest) nogil
+    cdef void node_value(self, double epsilon, double* dest) nogil
+
     cdef double impurity_improvement(self, double impurity) nogil
 
 
@@ -132,11 +134,13 @@ cdef class Splitter:
                          double* weighted_n_node_samples) nogil
 
     cdef void node_split(self,
+                         double epsilon_per_action
                          double impurity,   # Impurity of the node
                          SplitRecord* split,
                          SIZE_t* n_constant_features) nogil
 
-    cdef void node_value(self, double* dest) nogil
+    #cdef void node_value(self, double* dest) nogil
+    cdef void node_value(self, double epsilon, double* dest) nogil
 
     cdef double node_impurity(self) nogil
 
@@ -209,6 +213,10 @@ cdef class TreeBuilder:
     cdef SIZE_t min_samples_split   # Minimum number of samples in an internal node
     cdef SIZE_t min_samples_leaf    # Minimum number of samples in a leaf
     cdef SIZE_t max_depth           # Maximal tree depth
+
+    cdef SIZE_t diffprivacy
+    cdef double budget
+    cdef double epsilon_per_depth
 
     cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
                 np.ndarray sample_weight=*)
