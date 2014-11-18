@@ -134,7 +134,7 @@ cdef class Splitter:
                          double* weighted_n_node_samples) nogil
 
     cdef void node_split(self,
-                         double epsilon_per_action
+                         double epsilon_per_action,
                          double impurity,   # Impurity of the node
                          SplitRecord* split,
                          SIZE_t* n_constant_features) nogil

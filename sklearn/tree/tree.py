@@ -583,12 +583,14 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
     budget : over all budget for differential privacy
 
     check_n_samples :   if True, check the number of samples when splitting nodes
-                        if False, it will split into a
+                        if False, it will split into a complete binary tree
+                       	*TO DO* 
 
     diffprivacy_mech : laplace, exponential, leaf_laplace 
-            (1) lapace, add laplace noise when selecting features for splitting nodes
-            (2) exponential, use exponential mechanism when selecting features for splitting nodes
-            (3) leaf_lapace, after constructing the tree, add laplace noise on each leaf node
+    		0:	no, 		no differential privacy
+            1:  lapace, add laplace noise when selecting features for splitting nodes
+            2:  *TO DO* exponential, use exponential mechanism when selecting features for splitting nodes
+            3:  *TO DO* leaf_lapace, after constructing the tree, add laplace noise on each leaf node
 
 
     Attributes
@@ -604,7 +606,7 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
             
                  budget = 1.0,
                  check_n_samples = True,
-                 diffprivacy_mech = "laplace",
+                 diffprivacy_mech = 1,
 
                  criterion="gini",
                  splitter="best",
@@ -642,9 +644,6 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # inner tree structure
         self.tree_ = None
-
-        self.budget_per_depth_ = None
-
 
     def format_y(self, y, n_samples):
         '''
@@ -838,16 +837,17 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         ## check budget > 0
         if self.budget <= 0:
+        	#if self.budget != -1.0:
             raise ValueError("privacy budget must be greater than zero.")
 
-        #diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
-        if self.diffprivacy_mech == "leaf_laplace":
-            self.epsilon = self.budget
-        elif self.diffprivacy_mech == "laplace":
-            self.epsilon = self.budget/(2*(max_depth+1))
-        else: # self.diffprivacy_mech == "exponential":
-        	n_numeric_features = self.n_features_
-        	self.epsilon = self.budget/((2+n_numeric_features)*max_depth+2)	
+        # #diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
+        # if self.diffprivacy_mech == "leaf_laplace":
+        #     self.epsilon = self.budget
+        # elif self.diffprivacy_mech == "laplace":
+        #     self.epsilon = self.budget/(2*(max_depth+1))
+        # else: # self.diffprivacy_mech == "exponential":
+        # 	n_numeric_features = self.n_features_
+        # 	self.epsilon = self.budget/((2+n_numeric_features)*max_depth+2)	
 
         # Build tree
         # Set criterion
@@ -860,7 +860,10 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # DepthFirst if max_leaf_nodes is not given
         if max_leaf_nodes < 0:
-            builder = DepthFirstTreeBuilder(splitter, 
+            builder = DepthFirstTreeBuilder(self.diffprivacy_mech,	#DIFFPRIVACY
+            								self.budget,			
+
+            								splitter, 
                                             min_samples_split,
                                             self.min_samples_leaf, 
                                             max_depth)

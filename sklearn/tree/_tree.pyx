@@ -81,6 +81,19 @@ NODE_DTYPE = np.dtype({
 })
 
 
+# DIFFPRIVACY
+cdef inline double laplace(double epsilon):
+    
+    # No diffprivacy
+    if epsilon <= 0.0:
+        return 0.0
+
+    cdef uniform = random_state.random()-0.5
+    if uniform > 0.0:
+        return -epsilon*np.log(1.0-2*uniform)
+    else:
+        return +epsilon*np.log(1.0+2*uniform)
+
 # =============================================================================
 # Criterion
 # =============================================================================
@@ -99,7 +112,7 @@ cdef class Criterion:
         """Reset the criterion at pos=start."""
         pass
 
-    cdef void update(self, SIZE_t new_pos) nogil:
+    cdef void update(self, double epsilon_per_action, SIZE_t new_pos) nogil:
         """Update the collected statistics by moving samples[pos:new_pos] from
            the right child to the left child."""
         pass
@@ -127,17 +140,22 @@ cdef class Criterion:
 
            where N is the total number of samples, N_t is the number of samples
            in the current node, N_t_L is the number of samples in the left
-           child and N_t_R is the number of samples in the right child."""
+           child and N_t_R is the number of samples in the right child.
+
+           *diffprivacy*
+                return (left_impurity + right_impurity)
+           """
         cdef double impurity_left
         cdef double impurity_right
 
+        # DIFFPRIVCAY
         self.children_impurity(&impurity_left, &impurity_right)
 
-        # return (impurity_right + impurity_left)
+        return (impurity_right + impurity_left)
 
-        return ((self.weighted_n_node_samples / self.weighted_n_samples) *
-                (impurity - self.weighted_n_right / self.weighted_n_node_samples * impurity_right
-                          - self.weighted_n_left  / self.weighted_n_node_samples * impurity_left))
+        #return ((self.weighted_n_node_samples / self.weighted_n_samples) *
+        #        (impurity - self.weighted_n_right / self.weighted_n_node_samples * impurity_right
+        #                  - self.weighted_n_left  / self.weighted_n_node_samples * impurity_left))
 
 cdef class ClassificationCriterion(Criterion):
     """Abstract criterion for classification."""
@@ -220,7 +238,8 @@ cdef class ClassificationCriterion(Criterion):
         pass
 
     cdef void init(self, 
-                   double    epsilon_per_fx,
+                   double    epsilon_per_action,    #DIFFPRIVACY
+
                    DOUBLE_t* y, 
                    SIZE_t    y_stride,
                    DOUBLE_t* sample_weight, 
@@ -231,10 +250,16 @@ cdef class ClassificationCriterion(Criterion):
         """Initialize the criterion at node samples[start:end] and
            children samples[start:start] and samples[start:end].
 
-           update:
+            update:
                 label_count_total,(class distribution)
                 weighted_n_node_samples
-           """
+
+            *diffprivacy*:
+                each label_count in label_count_total += laplace(1/(epsilon_per_action*n_outputs))
+                weighted_n_node_samples = sum(label_count_total)/n_outputs
+
+            for each node, call once
+        """
         # Initialize fields
 
         self.y        = y
@@ -279,20 +304,24 @@ cdef class ClassificationCriterion(Criterion):
             for k in range(n_outputs):
                 c = <SIZE_t> y[i * y_stride + k]
                 label_count_total[k * label_count_stride + c] += w
-                #label_count_total[k * label_count_stride + c] += w + laplace(1.0/epsilon)
 
             weighted_n_node_samples += w
-            #noisy_weighted_n_node_samples += w+laplace(1.0/epsilon)
 
         self.weighted_n_node_samples = weighted_n_node_samples
-        #self.noisy_weighted_n_node_samples = noisy_n_node_samples
 
         # DIFFPRIVACY
-        self.epsilon_per_fx = epsilon_per_fx
-        self.epsilon_4_w_n_node_samples = self.epsilon_per_fx/(1+weighted_n_node_samples)
-        self.epsilon_4_update = self.epsilon_4_w_n_node_samples*weighted_n_node_samples
+        self.epsilon_per_action = epsilon_per_action
+        
+        weighted_n_node_samples = 0.0
+        for k in range(n_outputs):
+            for c in range(n_classes[k]):
+                label_count_total[k*label_count_stride+c] += laplace(1.0/(epsilon_per_action*n_outputs))
+                weighted_n_node_samples += label_count_total[k*label_count_stride+c]
 
-        self.weighted_n_node_samples += laplace(1.0/self.epsilon_4_w_n_node_samples)
+        self.weighted_n_node_samples = weighted_n_node_samples/n_outputs
+        if self.weighted_n_node_samples < 0.0:
+            # what to do?
+            pass
 
         # Reset to pos=start
         self.reset()
@@ -302,6 +331,8 @@ cdef class ClassificationCriterion(Criterion):
 
         all count in label_count_left is reset to 0
         all count in label_count_right equals to the values in label_count_total
+
+        for a node, call (n_feature+1) times
         """
         self.pos = self.start
 
@@ -325,11 +356,20 @@ cdef class ClassificationCriterion(Criterion):
             label_count_left  += label_count_stride
             label_count_right += label_count_stride
 
-    cdef void update(self, SIZE_t new_pos) nogil:
+    cdef void update(self, double epsilon_per_action, SIZE_t new_pos) nogil:
         """Update the collected statistics by moving samples[pos:new_pos] from
             the right child to the left child.
 
             [start:pos:end] -> [start:new_pos:end]
+
+            *diffprivacy*:
+                when moving samples[pos,new_pos] from right[pos,end] to left[start,pos]
+                add e=epsilon_4_update noisy
+
+                because one sample could only moved from *right* to *left*, 
+                for each feature examined, only budget=epsilon_4_update are used.
+
+            for a feature, call <= (number of values) times
         """
         cdef DOUBLE_t* y = self.y
         cdef SIZE_t y_stride = self.y_stride
@@ -352,6 +392,8 @@ cdef class ClassificationCriterion(Criterion):
         cdef DOUBLE_t w = 1.0
         cdef DOUBLE_t diff_w = 0.0
 
+        cdef DOUBLE_t noise = 0.0
+        cdef DOUBLE_t noise_total = 0.0
         # Note: We assume start <= pos < new_pos <= end
 
         for p in range(pos, new_pos):
@@ -361,14 +403,19 @@ cdef class ClassificationCriterion(Criterion):
                 w = sample_weight[i]
 
             # DIFFPRIVACY 
-            w += laplace(1.0/(epsilon_4_update*n_outputs))
+            w += laplace(1.0/(epsilon_per_action*n_outputs))
 
+            noise_total = 0.0
             for k in range(n_outputs):
+                noise = laplace(1.0/(epsilon_per_action*n_outputs))
+                
                 label_index = (k * label_count_stride + <SIZE_t> y[i * y_stride + k])
-                label_count_left[label_index]  += w 
-                label_count_right[label_index] -= w
+                label_count_left[label_index]  +=  w + noise
+                label_count_right[label_index] -= (w + noise) 
 
-            diff_w += w
+                noise_total += noise
+
+            diff_w += w + (noise_total/n_outputs)
 
         self.weighted_n_left  += diff_w
         self.weighted_n_right -= diff_w
@@ -382,7 +429,7 @@ cdef class ClassificationCriterion(Criterion):
                                 double* impurity_right) nogil:
         pass
 
-    cdef void node_value(self, double epsilon, double* dest) nogil:
+    cdef void node_value(self, double* dest) nogil:
         """Compute the node value of samples[start:end] into dest.
 
             Copy class distribution to dest
@@ -399,15 +446,25 @@ cdef class ClassificationCriterion(Criterion):
         for k in range(n_outputs):
             memcpy(dest, label_count_total, n_classes[k] * sizeof(double))
             
-            if epsilon > 0.0:
-                zero_cnt = 0
-                for i in range(n_classes[k]):
-                    dest[i] += laplace(1.0/epsilon)
-                    if dest[i] <= 0.0:
-                        dest[i] = 0.0
-                        zero_cnt += 1
-                if zero_cnt == n_classes[k]:
-                    dest[random_state.randint(0,n_classes[k])] += 1.0   # XXX random_state
+            # DIFFPRIVACY
+            #if epsilon > 0.0:
+            #    epsilon_per_output = epsilon/n_outputs
+            #    zero_cnt = 0
+            #    for i in range(n_classes[k]):
+            #        dest[i] += laplace(1.0/epsilon_per_output)
+            #        if dest[i] <= 0.0:
+            #            dest[i] = 0.0
+            #            zero_cnt += 1
+            #    if zero_cnt == n_classes[k]:
+            #        dest[random_state.randint(0,n_classes[k])] += 1.0   # XXX random_state
+
+            zero_cnt = 0
+            for i in range(n_classes[k]):
+                if dest[i] <= 0.0:
+                    dest[i] = 0.0
+                    zero_cnt += 1
+            if zero_cnt == n_classes[k]:
+                dest[random_state.randint(0,n_classes[k])] += 1.0   # XXX random_state
 
             dest += label_count_stride
             label_count_total += label_count_stride
@@ -560,7 +617,10 @@ cdef class Gini(ClassificationCriterion):
                                 double* impurity_right) nogil:
         """Evaluate the impurity in children nodes, i.e. the impurity of the
            left child (samples[start:pos]) and the impurity the right child
-           (samples[pos:end])."""
+           (samples[pos:end]).
+
+           *diffprivacy*
+        """
         cdef double weighted_n_node_samples = self.weighted_n_node_samples
         cdef double weighted_n_left = self.weighted_n_left
         cdef double weighted_n_right = self.weighted_n_right
@@ -600,6 +660,7 @@ cdef class Gini(ClassificationCriterion):
                                           
             total_left  += gini_left
             total_right += gini_right
+
             label_count_left  += label_count_stride
             label_count_right += label_count_stride
 
@@ -674,6 +735,7 @@ cdef class Splitter:
                 n_features
                 constant_features
 
+            for a tree, call only once
         """
         # Reset random state
         self.rand_r_state = self.random_state.randint(0, RAND_R_MAX)
@@ -724,16 +786,25 @@ cdef class Splitter:
         self.y_stride = <SIZE_t> y.strides[0] / <SIZE_t> y.itemsize         # stride from the class value of one sample to that of next sample
         self.sample_weight = sample_weight
 
-    cdef void node_reset(self, SIZE_t start, SIZE_t end,
+    cdef void node_reset(self, double epsilon_per_action, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil:
         """Reset splitter on node samples[start:end].
 
             Recalculate class distribution from index 'start' to 'end'
+        
+            *diffprivacy*:
+                add epsilon_per_fx parameter -> criterion.init()
+                weighted_n_node_samples[0] += laplace
+
+            for each node, call only once
         """
         self.start = start
         self.end   = end
 
-        self.criterion.init(self.y,
+        self.criterion.init(
+                            epsilon_per_action,
+
+                            self.y,
                             self.y_stride,
                             self.sample_weight,
                             self.weighted_n_samples,
@@ -743,16 +814,16 @@ cdef class Splitter:
 
         weighted_n_node_samples[0] = self.criterion.weighted_n_node_samples
 
-    cdef void node_split(self, double impurity, SplitRecord* split,
+    cdef void node_split(self, double epsilon_per_action, double impurity, SplitRecord* split,
                          SIZE_t* n_constant_features) nogil:
         """Find a split on node samples[start:end]."""
         pass
 
-    cdef void node_value(self, epsilon, double* dest) nogil:
+    cdef void node_value(self, double* dest) nogil:
         """Copy the value of node samples[start:end] into dest.
            Copy class distribution to dest
         """
-        self.criterion.node_value(epsilon, dest)
+        self.criterion.node_value(dest)
 
     cdef double node_impurity(self) nogil:
         """Copy the impurity of node samples[start:end]."""
@@ -767,7 +838,7 @@ cdef class BestSplitter(Splitter):
                                self.min_samples_leaf,
                                self.random_state), self.__getstate__())
 
-    cdef void _choose_best_split_point(self, double epsilon, DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
+    cdef void _choose_best_split_point(self, double epsilon_per_action,  DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
         '''Give a feature, find the best split point'''
         
         cdef SplitRecord best
@@ -797,7 +868,7 @@ cdef class BestSplitter(Splitter):
                     continue
 
                 # move sample [start,pos,end] to range[start,new_pos,end]
-                self.criterion.update(current.pos)
+                self.criterion.update(epsilon_per_action, current.pos)
                 current.improvement = self.criterion.impurity_improvement(impurity)
 
                 if current.improvement > feature_best.improvement:
@@ -812,12 +883,11 @@ cdef class BestSplitter(Splitter):
 
                     split[0] = best
 
-    cdef void _exp_choose_best_split_point(self, double epsilon, DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
+    cdef void _exp_choose_best_split_point(self, double epsilon_per_action, DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
         '''Give a feature, using exponential mechanism to find the best split point'''
         pass
 
-    cdef void node_split(self, 
-                         double epsilon,
+    cdef void node_split(self, double epsilon_per_action,
                          double impurity, SplitRecord* split,
                          SIZE_t* n_constant_features) nogil:
         """Find the best split on node samples[start:end]."""
@@ -852,7 +922,7 @@ cdef class BestSplitter(Splitter):
         cdef SIZE_t partition_end
 
         # DIFFPRIVACY
-        cdef epsilon_per_fx = epsilon / (max_features+1)
+        #cdef epsilon_per_fx = epsilon / (max_features+1)
 
         _init_split(&best, end)
         feature_best  = <SplitRecord*> calloc(self.n_features, sizeof(SplitRecord)) # free after using
@@ -959,12 +1029,11 @@ cdef class BestSplitter(Splitter):
                     f_i -= 1
                     features[f_i], features[f_j] = features[f_j], features[f_i]
 
-
                     #self._choose_best_split_point(Xf, start, end, current, &feature_best[f_i])
-                    self._lap_choose_best_split_point(epsilon, Xf, start, end, current, &feature_best[f_i])
+                    self._choose_best_split_point( Xf, epsilon_per_action, start, end, current, &feature_best[f_i])
                     #self._exp_choose_best_split_point(epsilon, Xf, start, end, current, &feature_best[f_i])    
 
-                    if features_best[f_i].improvement > best.improvement
+                    if features_best[f_i].improvement > best.improvement:
                         best = feature_best[f_i]
 
         # exponential mechanism
@@ -999,6 +1068,7 @@ cdef class BestSplitter(Splitter):
         # Return values
         split[0] = best
         n_constant_features[0] = n_total_constants
+
 
 
 # Sort n-element arrays pointed to by Xf and samples, simultaneously,
@@ -1129,15 +1199,17 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
     """Build a decision tree in depth-first fashion."""
 
     def __cinit__(self, 
+                    int diffprivacy,        # 0=no, 1=lap, 2=exp
+                    double budget,
+                    
                     Splitter splitter,
 
                     SIZE_t min_samples_split,   
                     SIZE_t min_samples_leaf, 
                     SIZE_t max_depth,
-
-                    int diffprivacy,        # 0=no, 1=lap, 2=exp
-                    double budget
                     ):
+
+        print "Hello from cython!"
 
         self.splitter = splitter
 
@@ -1147,7 +1219,9 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         self.max_depth = max_depth
 
         self.diffprivacy = diffprivacy
-        self.budget      = budget
+        self.budget      = budget   # = -1.0 if diffprivacy is 0(=no)
+        if self.diffprivacy == 0:
+            self.budget = -1.0
 
     cpdef build(self, 
                 Tree       tree, 
@@ -1190,16 +1264,15 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         cdef SIZE_t min_samples_split = self.min_samples_split
 
 
-        # DIFFPRIVACY 
-        cdef double epsilon_per_action
+        # Setting for DIFFPRIVACY 
+        cdef DOUBLE_t epsilon_per_depth  = 0.0
+        cdef DOUBLE_t epsilon_per_action = 0.0
         if self.diffprivacy > 0:
-            self.epsilon_per_depth = self.budget/(self.max_depth+1)
-            if self.diffprivacy == 1:
-                epsilon_per_action = self.epsilon_per_depth/2.0
+            epsilon_per_depth = self.budget/(self.max_depth+1)
         else:
-            self.epsilon_per_depth = -1.0
-            epsilon_per_action = -1.0
+            epsilon_per_depth = -1.0
 
+        ###################################################
         ##2. Recursive partition (without actual recursion)
         splitter.init(X, y, sample_weight_ptr)
 
@@ -1222,7 +1295,7 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         cdef SIZE_t max_depth_seen = -1 # used to record the max depth
         cdef bint first = 1             # only for root node, calculate init impurity
 
-        cdef int rc = 0     # return value for stack.pop
+        cdef int rc = 0                 # return value for stack.pop
         cdef Stack stack = Stack(INITIAL_STACK_SIZE)
         cdef StackRecord stack_record
 
@@ -1255,17 +1328,21 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                 # DIFFPRIVACY: n_node_samples = node_samples + noisy(epsilon)
                 # since binary tree, the number of distinct values of all features is 2.
 
-                noisy_n_node_samples = n_node_samples + laplace(1.0/epsilon_per_action)
-                is_leaf = len(candidate_features)==0 
-                           or depth >= max_depth
-                           or noisy_n_node_samples/(2*n_classes) < sqrt(2)/epsilon
+                epsilon_per_action = epsilon_per_depth / (1+1+splitter.max_features)
 
-                #is_leaf = ((depth >= max_depth) or
-                #           (n_node_samples < min_samples_split) or
-                #           (n_node_samples < 2 * min_samples_leaf))
+                n_node_samples += laplace(1.0/epsilon_per_action)          # cost 1*epsilon_per_action
+
+                # DiffPrivacyC4.5 version
+                #is_leaf = len(candidate_features)==0 
+                #           or depth >= max_depth
+                #           or noisy_n_node_samples/(2*n_classes) < sqrt(2)/epsilon
+
+                is_leaf = ((depth >= max_depth) or
+                           (n_node_samples < min_samples_split) or
+                           (n_node_samples < 2 * min_samples_leaf))
 
                 # DIFFPRIVACY add noisy to n_node_samples, class distributions
-                splitter.node_reset(start, end, &weighted_n_node_samples)
+                splitter.node_reset(epsilon_per_action, start, end, &weighted_n_node_samples) # cost 1*epsilon_per_action
 
                 if first:
                     impurity = splitter.node_impurity()
@@ -1275,8 +1352,8 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 if not is_leaf:
                     # choose feature to split
-                    # DIFFPRIVACY epsilon = ?
-                    splitter.node_split(epsilon_per_action, impurity, &split, &n_constant_features)
+                    # DIFFPRIVCAY
+                    splitter.node_split(epsilon_per_action, impurity, &split, &n_constant_features) # cost epsilon max_features*epsilon_per_action
                     is_leaf = is_leaf or (split.pos >= end)
 
                                                     # a Node structure
@@ -1291,14 +1368,12 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 if is_leaf:
                     # Only store class distribution for leaf node
-                    
-                    # DIFFPRIVCAY: noisy count, budget = epsilon_per_action 
-                    splitter.node_value( epsilon_per_action ,tree.value + node_id*tree.value_stride)
+                    splitter.node_value(tree.value + node_id*tree.value_stride)  # cost epsilon
 
                 else:
                     # Push right child on stack
                     # [split.pos, end]
-                    rc = stack.push(split.pos, end, depth + 1, node_id, 0,
+                    rc = stack.push(split.pos, end, depth + 1, node_id, 0,      
                                     split.impurity_right, n_constant_features)
                     if rc == -1:
                         break
