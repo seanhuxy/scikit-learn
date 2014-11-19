@@ -80,20 +80,6 @@ NODE_DTYPE = np.dtype({
     ]
 })
 
-
-# DIFFPRIVACY
-cdef inline double laplace(double epsilon):
-    
-    # No diffprivacy
-    if epsilon <= 0.0:
-        return 0.0
-
-    cdef uniform = random_state.random()-0.5
-    if uniform > 0.0:
-        return -epsilon*np.log(1.0-2*uniform)
-    else:
-        return +epsilon*np.log(1.0+2*uniform)
-
 # =============================================================================
 # Criterion
 # =============================================================================
@@ -101,7 +87,7 @@ cdef inline double laplace(double epsilon):
 cdef class Criterion:
     """Interface for impurity criteria."""
 
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
+    cdef void init(self, double epsilon_per_action, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
                    double weighted_n_samples, SIZE_t* samples, SIZE_t start,
                    SIZE_t end) nogil:
         """Initialize the criterion at node samples[start:end] and
@@ -838,6 +824,18 @@ cdef class BestSplitter(Splitter):
                                self.min_samples_leaf,
                                self.random_state), self.__getstate__())
 
+    # DIFFPRIVACY
+    cdef double laplace(double epsilon):
+        # No diffprivacy
+        if epsilon <= 0.0:
+            return 0.0
+
+        cdef double uniform = self.random_state.random()-0.5
+        if uniform > 0.0:
+            return -epsilon*np.log(1.0-2*uniform)
+        else:
+            return +epsilon*np.log(1.0+2*uniform) 
+
     cdef void _choose_best_split_point(self, double epsilon_per_action,  DTYPE_t* Xf, SIZE_t start, SIZE_t end, SplitRecord current, SplitRecord* split) nogil:
         '''Give a feature, find the best split point'''
         
@@ -1330,7 +1328,7 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
 
                 epsilon_per_action = epsilon_per_depth / (1+1+splitter.max_features)
 
-                n_node_samples += laplace(1.0/epsilon_per_action)          # cost 1*epsilon_per_action
+                n_node_samples += splitter.laplace(1.0/epsilon_per_action)          # cost 1*epsilon_per_action
 
                 # DiffPrivacyC4.5 version
                 #is_leaf = len(candidate_features)==0 

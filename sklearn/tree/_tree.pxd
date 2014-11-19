@@ -48,16 +48,15 @@ cdef class Criterion:
     # statistics correspond to samples[start:pos] and samples[pos:end].
 
     # Methods
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
+    cdef void init(self, double epsilon_per_action, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
                    double weighted_n_samples, SIZE_t* samples, SIZE_t start,
                    SIZE_t end) nogil
     cdef void reset(self) nogil
-    cdef void update(self, SIZE_t new_pos) nogil
+    cdef void update(self, double epsilon_per_action, SIZE_t new_pos) nogil
     cdef double node_impurity(self) nogil
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil
-    #cdef void node_value(self, double* dest) nogil
-    cdef void node_value(self, double epsilon, double* dest) nogil
+    cdef void node_value(self, double* dest) nogil
 
     cdef double impurity_improvement(self, double impurity) nogil
 
@@ -130,7 +129,7 @@ cdef class Splitter:
     # Methods
     cdef void init(self, np.ndarray X, np.ndarray y, DOUBLE_t* sample_weight)
 
-    cdef void node_reset(self, SIZE_t start, SIZE_t end,
+    cdef void node_reset(self, double epsilon_per_action, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil
 
     cdef void node_split(self,
@@ -139,8 +138,7 @@ cdef class Splitter:
                          SplitRecord* split,
                          SIZE_t* n_constant_features) nogil
 
-    #cdef void node_value(self, double* dest) nogil
-    cdef void node_value(self, double epsilon, double* dest) nogil
+    cdef void node_value(self, double* dest) nogil
 
     cdef double node_impurity(self) nogil
 
