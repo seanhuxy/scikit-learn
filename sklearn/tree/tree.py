@@ -751,10 +751,10 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
                                  (len(sample_weight), n_samples))
             return sample_weight
 
-    def set_criterion(self):
+    def set_criterion(self, random_state):
         criterion = self.criterion
         if not isinstance(criterion, Criterion):
-            criterion = CRITERIA_CLF[self.criterion](self.n_outputs_, self.n_classes_)
+            criterion = CRITERIA_CLF[self.criterion](self.n_outputs_, self.n_classes_, random_state)
         return criterion
 
     def set_splitter(self, criterion, random_state):
@@ -851,7 +851,7 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # Build tree
         # Set criterion
-        criterion = self.set_criterion()
+        criterion = self.set_criterion(random_state)
 
         # Set splitter
         splitter = self.set_splitter(criterion, random_state)
