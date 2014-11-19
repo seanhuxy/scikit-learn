@@ -27,7 +27,7 @@ from ..utils.validation import check_arrays
 
 from ._tree import Criterion
 from ._tree import Splitter
-from ._tree import DepthFirstTreeBuilder, BestFirstTreeBuilder
+from ._tree import DepthFirstTreeBuilder #, BestFirstTreeBuilder
 from ._tree import Tree
 from . import _tree
 
@@ -46,10 +46,11 @@ DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
 CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
-CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
-SPLITTERS = {"best": _tree.BestSplitter,
-             "presort-best": _tree.PresortBestSplitter,
-             "random": _tree.RandomSplitter}
+#CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
+SPLITTERS = {"best": _tree.BestSplitter }
+             #    ,
+             # "presort-best": _tree.PresortBestSplitter,
+             # "random": _tree.RandomSplitter}
 
 DIFFPRIVACY_MECH = {"laplace", "exponential", "leaf_laplace"}
 
@@ -249,8 +250,8 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
             if is_classification:
                 criterion = CRITERIA_CLF[self.criterion](self.n_outputs_,
                                                          self.n_classes_)
-            else:
-                criterion = CRITERIA_REG[self.criterion](self.n_outputs_)
+            # else:
+            #     criterion = CRITERIA_REG[self.criterion](self.n_outputs_)
 
         splitter = self.splitter
         if not isinstance(self.splitter, Splitter):
