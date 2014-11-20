@@ -81,12 +81,12 @@ NODE_DTYPE = np.dtype({
 })
 
 # DIFFPRIVACY
-cdef double laplace(double epsilon, object random_state) with gil:
+cdef double laplace(double epsilon, object random_state) except -1 with gil:
     # No diffprivacy
     if epsilon <= 0.0:
         return 0.0
 
-    cdef double uniform = random_state.random()-0.5
+    cdef double uniform = np.random.rand()-0.5
     if uniform > 0.0:
         return -epsilon*np.log(1.0-2*uniform)
     else:
@@ -1226,8 +1226,6 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                     SIZE_t min_samples_leaf, 
                     SIZE_t max_depth,
                     ):
-
-        print "Hello from cython!"
 
         self.splitter = splitter
 

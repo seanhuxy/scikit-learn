@@ -1,4 +1,3 @@
-test_iris.py
 *.pyc
 *.so
 *.pyd

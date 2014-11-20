@@ -814,7 +814,19 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
         y = self.format_y(y, n_samples)
 
         # Check parameters
+        if self.random_state == None :
+            print "Warning: random_state is None"
+            self.random_state = 1
+
         random_state = check_random_state(self.random_state)
+
+        if not isinstance(random_state, np.random.RandomState):
+            print "Error: random_state is not a RandomState after check_random_state"
+            import sys
+            sys.exit(1)
+
+        random_state = np.random.RandomState(1)
+
         max_depth = self.check_max_depth()
 
         # Set self.max_features_
@@ -871,7 +883,17 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
         else: # BestFirst
             warn("Not support BestFirstTreeBuilder")
 
+        print   "------------------------------------------------"
+        print   "DiffPrivacy decision tree:"
+        print   "diff privacy\t", self.diffprivacy_mech, "\n"\
+                "budget\t", self.budget, "\n"\
+                "max depth\t", max_depth, "\n" \
+                "min samples split\t", min_samples_split, "\n"\
+                "min samples leaf\t", self.min_samples_leaf, "\n"\
+
         builder.build(self.tree_, X, y, sample_weight)
+
+        print   "tree.max_depth:\t", self.tree_.max_depth 
 
         if self.n_outputs_ == 1:
             self.n_classes_ = self.n_classes_[0]
