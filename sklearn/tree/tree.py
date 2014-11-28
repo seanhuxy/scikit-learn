@@ -752,10 +752,10 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
                                  (len(sample_weight), n_samples))
             return sample_weight
 
-    def set_criterion(self, random_state):
+    def set_criterion(self):
         criterion = self.criterion
         if not isinstance(criterion, Criterion):
-            criterion = CRITERIA_CLF[self.criterion](self.n_outputs_, self.n_classes_, random_state)
+            criterion = CRITERIA_CLF[self.criterion](self.n_outputs_, self.n_classes_)
         return criterion
 
     def set_splitter(self, criterion, random_state):
@@ -798,10 +798,7 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
         -------
         self : object
             Returns self.
-        """
-
-        print("fitting samples using diffprivacy CART algorithm")
-
+        """     
         is_classification = isinstance(self, ClassifierMixin)
         if is_classification == False:
             warn("Should be a classifer")
@@ -820,12 +817,12 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         random_state = check_random_state(self.random_state)
 
-        if not isinstance(random_state, np.random.RandomState):
-            print "Error: random_state is not a RandomState after check_random_state"
-            import sys
-            sys.exit(1)
+        # if not isinstance(random_state, np.random.RandomState):
+        #     print "Error: random_state is not a RandomState after check_random_state"
+        #     import sys
+        #     sys.exit(1)
 
-        random_state = np.random.RandomState(1)
+        # random_state = np.random.RandomState(1)
 
         max_depth = self.check_max_depth()
 
@@ -845,13 +842,12 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
         # check sample_weight 
         sample_weight = self.check_sample_weight( sample_weight, n_samples)
 
-
         # Differential Privacy
 
-        ## check budget > 0
+        # check budget > 0
         if self.budget <= 0:
-        	#if self.budget != -1.0:
-            raise ValueError("privacy budget must be greater than zero.")
+            if self.diffprivacy_mech != 0:
+                raise ValueError("privacy budget must be greater than zero.")
 
         # #diffprivacy_mech = DIFFPRIVACY_MECH[self.diffprivacy_mech]
         # if self.diffprivacy_mech == "leaf_laplace":
@@ -864,7 +860,7 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
 
         # Build tree
         # Set criterion
-        criterion = self.set_criterion(random_state)
+        criterion = self.set_criterion()
 
         # Set splitter
         splitter = self.set_splitter(criterion, random_state)
@@ -884,16 +880,13 @@ class DiffPrivacyDecisionTreeClassifier(DecisionTreeClassifier):
             warn("Not support BestFirstTreeBuilder")
 
         print   "------------------------------------------------"
-        print   "DiffPrivacy decision tree:"
         print   "diff privacy\t", self.diffprivacy_mech, "\n"\
-                "budget\t", self.budget, "\n"\
-                "max depth\t", max_depth, "\n" \
-                "min samples split\t", min_samples_split, "\n"\
-                "min samples leaf\t", self.min_samples_leaf, "\n"\
+                "budget      \t", self.budget, "\n"\
+                "max depth   \t", max_depth, "" \
+                # "min samples split\t", min_samples_split, "\n"\
+                # "min samples leaf\t", self.min_samples_leaf\
 
         builder.build(self.tree_, X, y, sample_weight)
-
-        print   "tree.max_depth:\t", self.tree_.max_depth 
 
         if self.n_outputs_ == 1:
             self.n_classes_ = self.n_classes_[0]

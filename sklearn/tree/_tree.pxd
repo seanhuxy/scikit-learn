@@ -27,6 +27,8 @@ cdef class Criterion:
     # impurity of a split on that node. It also computes the output statistics
     # such as the mean in regression and class probabilities in classification.
 
+    cdef UINT32_t rand_r_state
+
     # Internal structures
     cdef DOUBLE_t* y                     # Values of y
     cdef SIZE_t y_stride                 # Stride in y (since n_outputs >= 1)
@@ -57,7 +59,7 @@ cdef class Criterion:
     cdef double node_impurity(self) nogil
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil
-    cdef void node_value(self, double* dest) nogil
+    cdef void node_value(self, double epsilon_per_action, double* dest) nogil
 
     cdef double impurity_improvement(self, double impurity) nogil
 
@@ -134,12 +136,13 @@ cdef class Splitter:
                          double* weighted_n_node_samples) nogil
 
     cdef void node_split(self,
+                         int diffprivacy,
                          double epsilon_per_action,
                          double impurity,   # Impurity of the node
                          SplitRecord* split,
                          SIZE_t* n_constant_features) nogil
 
-    cdef void node_value(self, double* dest) nogil
+    cdef void node_value(self, double epsilon_per_action, double* dest) nogil
 
     cdef double node_impurity(self) nogil
 

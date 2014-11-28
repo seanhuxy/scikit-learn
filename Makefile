@@ -44,6 +44,9 @@ trailing-spaces:
 cython:
 	find sklearn -name "*.pyx" -exec $(CYTHON) {} \;
 
+cython-tree:
+	find sklearn/tree -name "*.pyx" -exec $(CYTHON) {} \;
+
 ctags:
 	# make tags for symbol based navigation in emacs and vim
 	# Install with: sudo apt-get install exuberant-ctags
