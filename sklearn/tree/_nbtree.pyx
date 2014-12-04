@@ -13,7 +13,7 @@ cdef struct SplitRecord:
     SIZE_t threshold        # for continuous feature only
     DOUBLE_t improvement    # the improvement by selecting this feature
    
-    SIZE_t  n_values     
+    SIZE_t  n_subnodes
     SIZE_t* n_subnodes_samples
     SIZE_t* wn_subnodes_samples 
 
@@ -62,61 +62,82 @@ cdef class Data:
 ######################################################################
 cdef class Criterion:
 
-    SIZE_t start
-    SIZE_t end
-    SIZE_t pos
+    cdef SIZE_t start
+    cdef SIZE_t end
+    cdef SIZE_t pos
 
     Feature feature 
 
-    double* label_count_total
-    double* label_count 
+    double* label_count_totali  # shape[n_outputs][max_n_classes]
+    double* label_count         # shape[max_n_feature_values][n_outputs][max_n_classes] 
+    cdef SIZE_t label_count_stride
+    cdef SIZE_t feature_stride 
 
     def __cinit__(self, Data data):
-        self.data = data
+        '''
+            allocate:
+                label_count,
+                label_count_total
+
+            set:
+                label_count_stride, = max_n_classes 
+                feature_stride,     = max_n_classes * n_outputs 
+        '''
+        # self.data = data
 
         self.samples = NULL
 
         self.start = 0
         self.end   = 0
 
-        self.label_count_stride = data.max_labels 
+        self.label_count_stride = data.max_n_classes 
 
-        cdef SIZE_t n_elements = n_outputs * label_count_stride
-        self.label_count_total = <double*> calloc(n_elements, sizeof(double))
-        self.label_count = <double*> calloc(n_elements*data.max_feature_values)
+        cdef SIZE_t feature_stride = n_outputs * label_count_stride
+        self.label_count_total 
+            = <double*> calloc(feature_stride, sizeof(double))
+        self.label_count 
+            = <double*> calloc(feature_stride*data.max_n_feature_values, sizeof(double))
 
-        self.fvalue_stride = n_elements 
+        self.feature_stride = feature_stride
 
         if self.label_count_total == NULL 
         or self.label_count == NULL:
             raise MemoryError()
 
-    def node_init(self, 
+    def init(self, 
+                   Data      data,
                    SIZE_t*   samples, 
                    SIZE_t    start, 
-                   SIZE_t    end) nogil:
+                   SIZE_t    end,
+                   SIZE_t    weighted_n_node_samples
+                   ) nogil:
         '''
         For one node, called once,
         update class distribution in this node
             
-        init: 
-            label_count_total, 2d array ( n_outputs, max_n_classes )     
+        fill: 
+            label_count_total, shape[n_outputs][max_n_classes]    
+        update:
+            weighted_n_node_samples  
         '''
-          
-        cdef UINT32_t* random_state = &self.rand_r_state
+        # cdef UINT32_t* random_state = &self.rand_r_state
         
         # Initialize fields
-        self.sample_weight = sample_weight
-        self.samples  = samples
+        # self.sample_weight = sample_weight
+        # self.samples  = samples
         
         self.start    = start
         self.end      = end
         self.n_node_samples = end - start
-        
-        # Initialize label_count_total and weighted_n_node_samples
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
+      
+        # XXX
+        Data data = data
+
+        # fill label_count_total and weighted_n_node_samples
+        cdef SIZE_t n_outputs  = data.n_outputs
+        cdef SIZE_t* n_classes = data.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
+        
         cdef double* label_count_total = self.label_count_total
         cdef double weighted_n_node_samples = 0.0
         
@@ -150,42 +171,51 @@ cdef class Criterion:
 
 
     def update(self,
-            SplitRecord split, 
-            double* Xf
-            ):       # only for continuous feature
+            SplitRecord split_record, 
+            double* Xf      # only for continuous feature
+            ):       
         '''
         udpate:
-            label_count, 3d array (n_values of current feature, n_outputs, max_n_classes)
+            label_count, array[n_subnodes][n_outputs][max_n_classes]
         '''
-        cdef Feature feature = self.data.features[split.feature_index]
+        cdef Feature* feature = &self.data.features[split.feature_index]
         
         cdef SIZE_t start = self.start
         cdef SIZE_t end   = self.end
 
-        if feature.type == FEATURE_CONTINUOUS:
-            pos = split.pos
-            
+        cdef SIZE_t feature_stride = self.feature_stride 
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef SIZE_t class_label
+        cdef SIZE_t label_index
+        cdef SIZE_t p, s_i, f_i, k, 
+        cdef DOUBLE_t w
 
-        else:
-            #feature_value = 0  # feature value, from 0 to feature.n_values-1   
-            for p in range(start, end):
-                i = samples[p]
+        #feature_value = 0  # feature value, from 0 to feature.n_values-1   
+        for p in range(start, end):
+            s_i = samples_win[p]
            
-                if self.data.sample_weight != NULL:
-                    w = self.data.sample_weight[i]
-                else:
-                    w = 1.0
+            if self.data.sample_weight != NULL:
+                w = self.data.sample_weight[s_i]
+            else:
+                w = 1.0
 
-                for k in range(n_outputs):
+            for k in range(n_outputs):
                     
-                    label  = <SIZE_t> data.y[ i * data.y_stride + k]# y[i,k]
-                    fvalue = Xf[p]
+                class_label =<SIZE_t> data.y[ s_i * data.y_stride + k] # y[i,k]
+                    
+                if feature.type == FEATURE_CONTINUOUS:
+                    if Xf[p] < split_record.threshold:
+                        f_i = 0
+                    else:
+                        f_i = 1
+                else:
+                    f_i = Xf[p]
 
-                    label_index = fvalue * fvalue_stride            # label_count[ fvalue, k, label ]
-                                + k      * label_count_stride
-                                + label
+                label_index = f_i * fvalue_stride            # label_count[ fvalue, k, label ]
+                            + k   * label_count_stride
+                            + class_label
 
-                    label_count[label_index] += w
+                label_count[label_index] += w
 
     def double node_impurity(self, double* label_count, SIZE_t wn_samples):
 
@@ -235,15 +265,31 @@ cdef class Criterion:
 
 cdef class Splitter:
 
+    cdef public Criterion criterion
+    cdef Data data
+    cdef Object random
+
+    cdef SIZE_t* samples_win
+    cdef SIZE_t  start, end
+
+    cdef SIZE_t* features_win
+    cdef SIZE_t  n_features
+    
+    cdef DOUBLE_t feature_values        # .temp
+
+    cdef SIZE_t max_candid_features     # reserved
+
     def __cinit__(self,
                     Criterion criterion,
                     SIZE_t max_candid_features,
                     object random_state):
 
         self.criterion = criterion
-        self.samples = NULL
+       
+        self.samples_win = NULL
+        
         self.features_window = NULL
-        self.feature_values = NULL # tempory array
+        self.feature_values  = NULL # tempory array
         self.max_candid_features = max_candid_features
         
         self.random = ... 
@@ -254,24 +300,24 @@ cdef class Splitter:
             #np.ndarray[double,  ndim=2] y,
             #Feature* features):
         '''
-        set samples
-        set features_window 
+        set samples_win
+        set features_win 
         set feature_values
         '''
         # set samples window
         cdef SIZE_t n_samples = data.n_samples
-        cdef SIZE_t* samples  = safe_realloc(&self.samples, n_samples)
+        cdef SIZE_t* samples_win  = safe_realloc(&self.samples_win, n_samples)
 
         cdef SIZE_t i
         for i in range(n_samples):
-            samples[i] = i
+            samples_win[i] = i
 
         # set features window
         cdef SIZE_t  n_features = data.n_features
-        cdef SIZE_t* features_window 
-                = safe_realloc (&self.features_window, n_features)
+        cdef SIZE_t* features_win 
+                = safe_realloc (&self.features_win, n_features)
         for i in range(n_features):
-            features_window[i] = i
+            features_win[i] = i
 
         safe_realloc(&self.feature_values, n_samples)
 
@@ -303,72 +349,92 @@ cdef class Splitter:
             double epsilon,
             SplitRecord* split_record, 
             SIZE_t n_node_features):
-        ''' Find best feature for split,
-            For continuous feature, also find best split point '''
-
-        Data data = self.data
-
-        SplitRecord* feature_records 
-            = <SplitRecord*> calloc(n_node_features, sizeof(SplitRecord))
+        ''' 
+            Calculate:
+                best feature for split,
+                best split point (for continuous feature)
+        '''
+        # create and init split records
+        cdef SplitRecord* feature_records 
+                = <SplitRecord*> calloc(n_node_features, sizeof(SplitRecord))
         _init_split(feature_records, n__features)
 
-        SplitRecord current
-        SplitRecord best
+        cdef SplitRecord current, best
+        _init_split(current)
+        _init_split(best)
 
-        SIZE_t* features_window = self.features_window 
+        cdef Data data = self.data
+        cdef SIZE_t samples_win = self.samples_win
 
-        SIZE_t f_i = n_node_features-1
-        SIZE_t f_j = 0
+        cdef Feature* feature
+        cdef SIZE_t* features_win = self.features_win 
+        cdef SIZE_t f_i = n_node_features-1
+                    f_j = 0
 
-        DOUBLE_t* Xf = self.feature_values
+        cdef DOUBLE_t* Xf = self.feature_values
 
         while f_j <= f_i :
+            _init_split(current)
             current.feature_index = features_window[f_j]
+            feature = &data.features[current.feature_index]
 
             # copy to Xf
             for p in range(start, end):
-                Xf[p] = data.X [    # X[sample_index, feature_index] 
-                                data.X_sample_stride  * samples[p] + 
-                                data.X_feature_stride * current.feature_index
-                                ]
+                # Xf[p] = X[sample_index, feature_index]
+                Xf[p] = data.X [     
+                        samples_win[p]        * data.X_sample_stride  
+                     +  current.feature_index * data.X_feature_stride ]
             
+            # TODO 
             sort(Xf+start, samples+start, end-start)
 
             # if constant feature
             if Xf[end-1] <= Xf[start] + FEATURE_THRESHOLD:
-                features_window[f_j] = features_window[f_i]
-                features_window[f_i] = current.feature_index 
+                features_win[f_j] = features_win[f_i]
+                features_win[f_i] = current.feature_index 
                 f_i --
-
+                # goes to next candidate feature
+            
             # not constant feature
             else:                
                 # if continuous feature
-                if data.features[ current.feature_index ].type == FEATURE_CONTINUOUS:
+                if feature.type == FEATURE_CONTINUOUS:
+                    current.n_subnodes = 2
+
+                    # TODO set threshold, 
                     _choose_split_point(&current)
                 
-                else:
-                    current.n_values = self.data.features[current.feature].n_values
+                    # set  n_subnodes_samples
+                    # set wn_subnodes_samples
 
-                    n_subnodes_samples  = <SIZE_t*> safe_realloc(current.n_subnodes_samples, feature.n_values)
+                else:
+                    current.n_subnodes = feature.n_values
+
+                    n_subnodes_samples  = <SIZE_t*> safe_realloc(current.n_subnodes_samples,  feature.n_values)
                     wn_subnodes_samples = <SIZE_t*> safe_realloc(current.wn_subnodes_samples, feature.n_values)
                     
                     for i in range(start,end):
-                        w = sample_weight[ i ] 
+                        if data.samples_weight == NULL:
+                            w = 1.0
+                        else:
+                            w = data.sample_weight[ i ]
+
                         n_subnodes_samples[ Xf[i] ] ++
                         wn_subnodes_samples[ Xf[i] ] += w
 
+                # XXX
                 self.criterion.update(current)
                 current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_values)
 
+                feature_records[f_j] = current
                 if current.improvement > best.improvement
                     best = current
 
                 f_j ++
 
-        
         _choose_split_feature(feature_records, &best )
 
-        split_record[0] = best
+        split_record[0]    = best
         n_node_features[0] = f_i+1 
 
 cdef class LapSplitter(Splitter):
@@ -382,8 +448,6 @@ cdef class ExpSplitter(Splitter):
     cdef _choose_split_point():
 
     cdef _choose_split_feature():
-
-
 
 cdef class DepthFirstNBTreeBuilder:
 
@@ -447,8 +511,6 @@ cdef class DepthFirstNBTreeBuilder:
         cdef double epsilon_per_action
         printf("espilon per action is %d", epsilon_per_action)
 
-        # XXX: splitter init
-        splitter.init(data)
         #######################
         # recursively depth first build tree 
 
@@ -495,7 +557,8 @@ cdef class DepthFirstNBTreeBuilder:
 
                 # reset class distribution based on this node
                 # XXX: node_reset
-                # XXX: weighted_n_node_samples 
+                #       fill label_total_count,
+                #       calculate weighted_n_node_samples
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
                 # if leaf
