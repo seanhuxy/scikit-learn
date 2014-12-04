@@ -9,9 +9,13 @@ cdef struct Feature:
     cdef double min     # for continuous feature only
 
 cdef struct SplitRecord:
-    SIZE_t feature      # the index of the feature to split
-    SIZE_t threshold    # for continuous feature only
-    double improvement  # the improvement by selecting this feature
+    SIZE_t feature_index    # the index of the feature to split
+    SIZE_t threshold        # for continuous feature only
+    DOUBLE_t improvement    # the improvement by selecting this feature
+   
+    SIZE_t  n_values     
+    SIZE_t* n_subnodes_samples
+    SIZE_t* wn_subnodes_samples 
 
 cdef struct StackRecord:
     SIZE_t start
@@ -19,7 +23,7 @@ cdef struct StackRecord:
     SIZE_t depth
     SIZE_t parent
     SIZE_t index        # the index of this node in parent's children array
-    SIZE_t n_candid_features
+    SIZE_t n_node_features
 
 cdef struct Node:
     bint is_leaf        # If true, this is a leaf node
@@ -256,7 +260,7 @@ cdef class Splitter:
         '''
         # set samples window
         cdef SIZE_t n_samples = data.n_samples
-        cdef SIZE_t* samples = safe_realloc(&self.samples, n_samples)
+        cdef SIZE_t* samples  = safe_realloc(&self.samples, n_samples)
 
         cdef SIZE_t i
         for i in range(n_samples):
@@ -298,22 +302,22 @@ cdef class Splitter:
     cdef node_split(self, 
             double epsilon,
             SplitRecord* split_record, 
-            SIZE_t n_candid_features):
+            SIZE_t n_node_features):
         ''' Find best feature for split,
             For continuous feature, also find best split point '''
 
         Data data = self.data
 
         SplitRecord* feature_records 
-            = <SplitRecord*> calloc(n_candid_features, sizeof(SplitRecord))
-        _init_split(feature_records, n_candid_features)
+            = <SplitRecord*> calloc(n_node_features, sizeof(SplitRecord))
+        _init_split(feature_records, n__features)
 
         SplitRecord current
         SplitRecord best
 
         SIZE_t* features_window = self.features_window 
 
-        SIZE_t f_i = n_candid_features-1
+        SIZE_t f_i = n_node_features-1
         SIZE_t f_j = 0
 
         DOUBLE_t* Xf = self.feature_values
@@ -333,7 +337,7 @@ cdef class Splitter:
             # if constant feature
             if Xf[end-1] <= Xf[start] + FEATURE_THRESHOLD:
                 features_window[f_j] = features_window[f_i]
-                features_window[f_i] = current.feature
+                features_window[f_i] = current.feature_index 
                 f_i --
 
             # not constant feature
@@ -365,7 +369,7 @@ cdef class Splitter:
         _choose_split_feature(feature_records, &best )
 
         split_record[0] = best
-        n_candid_features[0] = f_i+1 
+        n_node_features[0] = f_i+1 
 
 cdef class LapSplitter(Splitter):
 
@@ -383,11 +387,42 @@ cdef class ExpSplitter(Splitter):
 
 cdef class DepthFirstNBTreeBuilder:
 
+    # diffprivacy parameter
+    SIZE_t diffprivacy_mech
+    double budget
+
+    # tree parameter
+    SIZE_t max_depth
+    SIZE_t max_candid_features
+    
+    # inner structure
+    Splitter    splitter
+    Data        data    # X, y and metadata
+    Tree        tree
+
     cdef __cinit__(int diffprivacy_mech,
                     double budget,
                     Splitter splitter,
                     max_depth,
                     max_candid_features):
+
+        self.diffprivacy_mech = diffprivacy_mech
+        self.budget = budget
+
+        self.splitter = splitter
+
+        self.max_depth = max_depth  # verified by Classifier
+        self.max_candid_features = max_candid_features # verified
+
+        self.tree =     # XXX ??? pass parameter from python
+   
+    cdef _init_data(self, Data data, np.ndarray X, np.ndarray y, np.ndarray sample_weight=None, Feature* features):
+
+        data.X = X
+        data.y = y
+        data.sample_weight = sample_weight
+        
+        data.features = features
 
     cpdef build(self,
                 Tree    tree,
@@ -396,31 +431,49 @@ cdef class DepthFirstNBTreeBuilder:
                 np.ndarray  sample_weight=None,
                 Feature* features):
 
+        self.data = _init_data(X,y,sample_weight,features)
 
-        self._features = features 
-
-        # parameters setting in __cinit__
+        cdef Data data = self.data
+        cdef Splitter splitter = self.splitter
+        cdef Tree tree = tree
+        _init_tree(tree, max_depth) # init tree capacity based on max_depth
+        
+        # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
         cdef SIZE_t max_candid_features = self.max_candid_features
 
-        # calculate epsilon based on diffprivcy mech and max depth
+        # set parameter for diffprivacy
+        cdef DOUBLE_t budget = self.budget
         cdef double epsilon_per_action
         printf("espilon per action is %d", epsilon_per_action)
 
         # XXX: splitter init
-        splitter.init(X, y, features)
+        splitter.init(data)
         #######################
-        # recursively partition 
+        # recursively depth first build tree 
+
+        splitter.init(data) # set samples_win, features_win
+        SplitRecord split_record 
+
+        cdef SIZE_t max_depth_seen = -1 # record the max depth ever seen
+        cdef SIZE_t start, end,
+                    depth,
+                    parent, index,
+                    n_node_features
+        cdef SIZE_t n_node_samples,
+                    noisy_n_node_samples
+        cdef SIZE_t node_id
+
+        # init Stack structure
         cdef Stack stack = Stack(INITIAL_STACK_SIZE)
         cdef StackRecord stack_record
-
         # root node record
         stack_record.start = 0
-        stack_record.end   = n_node_samples 
+        stack_record.end   = split.n_samples 
         stack_record.depth = 0
         stack_record.parent=_TREE_UNDEFINED
         stack_record.index = 0
-        stack_record.n_candid_features  = 0
+        stack_record.n_node_features  = split.n_features
         # push root node into stack
         rc = stack.push(stack_record)
 
@@ -435,60 +488,67 @@ cdef class DepthFirstNBTreeBuilder:
                 depth = stack_record.depth
                 parent= stack_record.parent
                 index = stack_record.index
-                n_candid_features = stack_record.n_candid_features 
+                n_node_features = stack_record.n_node_features 
 
                 n_node_samples = end - start
-                noise(n_node_samples, epsilon_per_action)
+                noisy_n_node_samples = noise(n_node_samples, epsilon_per_action)
 
                 # reset class distribution based on this node
                 # XXX: node_reset
+                # XXX: weighted_n_node_samples 
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
                 # if leaf
                 if depth >= max_depth 
-                    or len(candid_features) <= 0
-                    or n_node_samples ... :
+                    or n_node_features <= 0
+                    or noisy_n_node_samples ... :
                     
                     # leaf node
-                    node_id = tree._add_node(parent,
-                                             index,
-                                             True,      # leaf node
-                                             NO_FEATURE,
-                                             NO_THRESHOLD,
-                                             n_node_samples,
-                                             weighted_n_node_samples
-                                             )
+                    node_id = tree._add_node(
+                            parent,
+                            index,
+                            True,      # leaf node
+                            NO_FEATURE,
+                            NO_THRESHOLD,
+                            0,                      # no children
+                            n_node_samples,
+                            weighted_n_node_samples # XXX
+                            )
                 
                     # store class distribution into node.values
-                    # XXX: node_value
+                    # TODO: node_value
                     splitter.node_value(tree, node_id)
                     # add noise to the class distribution
+                    # TODO: this is a generized verison
                     noise_distribution(tree.node[node_id].values, epsilon_per_action)
                 else:       
                     # inner node
                     # choose split feature
-                    # XXX: node_split
+                    # TODO: refine node_split
                     splitter.node_split( &split_record )
-                 
-                    node_id = tree._add_node(parent,
-                                             index,
-                                             False,     # not leaf node
-                                             split_record.feature,
-                                             split_record.threshold,
-                                             n_node_samples,
-                                             weighted_n_node_samples
-                                             )
+                
+                    node_id = tree._add_node(
+                            parent,
+                            index,
+                            False,     # not leaf node
+                            split_record.feature_index,
+                            split_record.threshold,
+                            split_record.n_values,  # number of children
+                            n_node_samples, 
+                            weighted_n_node_samples #XXX
+                            )
 
                     # push children into stack
-                    split_feature = self._feature[split_record.feature]   
-                    for i in range(split_feature.n_values):
+                    split_feature = data.features[split_record.feature_index]   
+                   
+                    for index in range(split_feature.n_values):
                         rc = stack.push(
-                            split_record.starts[i], # start pos
-                            split_record.ends[i],   # end pos
+                            split_record.starts[i], # start pos XXX
+                            split_record.ends[i],   # end pos   XXX
                             depth+1,                # depth of this new node
                             node_id,                # child's parent id
-                            i,                      # the index
-                            n_candid_features 
+                            index,                  # the index
+                            n_node_features 
                             )
                     
                         if rc == -1:
@@ -502,6 +562,85 @@ cdef class DepthFirstNBTreeBuilder:
 
 
 cdef class Tree:
+
+    ''' Array based no-binary decision tree
+
+    Attributes
+    ----------
+    n_features,
+    n_outputs,
+    n_classes
+    max_n_classes
+
+    node_count
+
+    capacity
+
+    max_depth
+
+    nodes : array of Node, shape[ capacity ]
+    
+    '''
+
+    def __cinit__(self,
+                int         n_features
+                np.ndarray[SIZE_t, ndim=1]  n_classes,
+                int                         n_outputs):
+
+        self.n_features = n_features
+        self.n_outputs  = n_outputs
+        self.n_classes  = NULL
+        safe_realloc(&self.n_classes, n_outputs)
+
+        self.max_n_classes = np.max(n_classes)
+        
+        cdef SIZE_t k
+        for k in range(n_outputs):
+            self.n_classes[k] = n_classes[k]
+
+        self.node_count = 0
+        self.max_depth  = 0
+        self.capacity   = 0
+        self.nodes      = NULL
+    
+    def __dealloc__(self):
+        free(self.n_classes)
+        free(self.nodes)
+
+    def void resize(self, SIZE_t capacity):
+        if self._resize_c(capacity) != 0:
+            raise MemoryError()
+    
+    ''' 
+        capacity by default = -1, means double the capacity of the inner struct
+    '''
+    cdef int _resize_c(self, SIZE_t capacity=<SIZE_t>(-1)) nogil:
+        
+        if capacity == self.capacity and self.nodes != NULL:
+            return 0
+
+        if capacity == <SIZE_t>(-1):
+            if self.capacity == 0:
+                capacity = 3  # default initial value
+            else:
+                capacity = 2 * self.capacity
+
+        # XXX no safe_realloc here because we need to grab the GIL
+        # realloc self.nodes
+        cdef void* ptr = realloc(self.nodes, capacity * sizeof(Node))
+        if ptr == NULL:
+            return -1
+        self.nodes = <Node*> ptr
+        
+        # if capacity smaller than node_count, adjust the counter
+        if capacity < self.node_count:
+            self.node_count = capacity
+
+        self.capacity = capacity
+        return 0
+
+    cdef SIZE_t _add_node(self, Node node) nogil:
+        pass:
 
     cpdef np.ndarray predict(self, np.ndarray[DTYPE_t, ndim=2] X):
         

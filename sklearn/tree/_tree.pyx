@@ -1460,7 +1460,6 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
             epsilon_per_depth = NO_DIFF_PRIVACY_BUDGET
             epsilon_per_action = NO_DIFF_PRIVACY_BUDGET
 
-
         print "epsilon_per_action is ", epsilon_per_action
 
 
