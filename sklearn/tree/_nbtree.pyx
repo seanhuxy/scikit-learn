@@ -17,14 +17,6 @@ cdef struct SplitRecord:
     SIZE_t* n_subnodes_samples
     SIZE_t* wn_subnodes_samples 
 
-cdef struct StackRecord:
-    SIZE_t start
-    SIZE_t end
-    SIZE_t depth
-    SIZE_t parent
-    SIZE_t index        # the index of this node in parent's children array
-    SIZE_t n_node_features
-
 cdef struct Node:
     bint is_leaf        # If true, this is a leaf node
 
@@ -60,6 +52,21 @@ cdef class Data:
     SIZE_t  weighted_n_samples 
 
 ######################################################################
+from libc.stdio cimport calloc, free, realloc
+from libc.string cimport memcpy, memset
+from libc.math   cimport log as ln
+from cpython cimport Py_INCREF, PyObject
+
+from sklearn.tree._nbutils cimport Stack, StackRecord
+
+import numpy as np
+cimport numpy as np
+np.import_array() # XXX
+
+# ====================================================================
+# Criterion
+# ====================================================================
+
 cdef class Criterion:
 
     cdef SIZE_t start
@@ -68,7 +75,7 @@ cdef class Criterion:
 
     Feature feature 
 
-    double* label_count_totali  # shape[n_outputs][max_n_classes]
+    double* label_count_total   # shape[n_outputs][max_n_classes]
     double* label_count         # shape[max_n_feature_values][n_outputs][max_n_classes] 
     cdef SIZE_t label_count_stride
     cdef SIZE_t feature_stride 
@@ -211,16 +218,17 @@ cdef class Criterion:
                 else:
                     f_i = Xf[p]
 
-                label_index = f_i * fvalue_stride            # label_count[ fvalue, k, label ]
+                label_index = f_i * feature_stride            # label_count[ fvalue, k, label ]
                             + k   * label_count_stride
                             + class_label
 
                 label_count[label_index] += w
 
+    # gini
     def double node_impurity(self, double* label_count, SIZE_t wn_samples):
 
         cdef double* label_count = label_count 
-        cdef SIZE_t wn_samples = wn_samples 
+        cdef SIZE_t wn_samples = wn_samples # + laplace(epsilon_per_action)
 
         cdef double total, gini, count
         cdef SIZE_t k, c
@@ -233,7 +241,7 @@ cdef class Criterion:
             gini = 0.0
 
             for c in range(n_classes[k]):
-                count = label_count[c]
+                count = label_count[c] # + laplace(epsilon_per_action)
                 gini += (count*count) / wn_samples 
             
             total += gini
@@ -248,11 +256,12 @@ cdef class Criterion:
         '''
         cdef double* label_count = self.label_count
        
-        cdef improvements = 0
+        cdef double improvements = 0
 
+        cdef SIZE_t i = 0
         # sum up node_impurity of each subset 
         for i in range(n_subnodes):
-            label_count += self.fvalue_stride 
+            label_count += self.feature_stride 
             improvement += self.node_impurity(label_count, wn_subnodes_samples[i])
 
         return improvement
@@ -261,7 +270,30 @@ cdef class Criterion:
         '''
         return class distribution of node, i.e. label_count_total
         '''
-        pass 
+        cdef SIZE_t n_outputs = self.data.n_outputs,
+                    n_classes = self.data.n_classes
+                    label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total 
+
+
+        cdef SIZE_t k
+        for k in range(n_outputs):
+            memcpy(dest, label_count_total, n_classes[k] * sizeof(double))
+
+            dest += label_count_stride
+            label_count_total += label_count_stride 
+
+# ===========================================================
+# Splitter 
+# ===========================================================
+cdef inline void _init_split(SplitRecord* self) nogil:
+    self.feature_index = 0
+    self.threshold = 0.0
+    self.improvement = -INFINITY
+
+    self.n_subnodes = 0
+    self.n_subnodes_samples = None
+    self.wn_subnodes_samples = None
 
 cdef class Splitter:
 
@@ -357,11 +389,13 @@ cdef class Splitter:
         # create and init split records
         cdef SplitRecord* feature_records 
                 = <SplitRecord*> calloc(n_node_features, sizeof(SplitRecord))
-        _init_split(feature_records, n__features)
+        cdef SIZE_t i
+        for i in range(n_features):
+            _init_split(&feature_records[i])
 
         cdef SplitRecord current, best
-        _init_split(current)
-        _init_split(best)
+        _init_split(&current)
+        _init_split(&best)
 
         cdef Data data = self.data
         cdef SIZE_t samples_win = self.samples_win
@@ -372,6 +406,9 @@ cdef class Splitter:
                     f_j = 0
 
         cdef DOUBLE_t* Xf = self.feature_values
+        cdef SIZE_t start = self.start,
+                    end   = self.end
+    
 
         while f_j <= f_i :
             _init_split(current)
@@ -385,7 +422,7 @@ cdef class Splitter:
                         samples_win[p]        * data.X_sample_stride  
                      +  current.feature_index * data.X_feature_stride ]
             
-            # TODO 
+            # TODO use _tree.py sort() 
             sort(Xf+start, samples+start, end-start)
 
             # if constant feature
@@ -399,14 +436,15 @@ cdef class Splitter:
             else:                
                 # if continuous feature
                 if feature.type == FEATURE_CONTINUOUS:
+                    raise("Warning, node_split not support continuous feature") 
                     current.n_subnodes = 2
-
+                    
                     # TODO set threshold, 
                     _choose_split_point(&current)
                 
                     # set  n_subnodes_samples
                     # set wn_subnodes_samples
-
+                    
                 else:
                     current.n_subnodes = feature.n_values
 
@@ -432,7 +470,10 @@ cdef class Splitter:
 
                 f_j ++
 
-        _choose_split_feature(feature_records, &best )
+        _choose_split_feature(&best, 
+                            feature_records, 
+                            f_i, 
+                            epsilon_per_action)
 
         split_record[0]    = best
         n_node_features[0] = f_i+1 
@@ -440,14 +481,45 @@ cdef class Splitter:
 cdef class LapSplitter(Splitter):
 
     cdef _choose_split_point():
+        raise("Laplace mech doesn't support continuous feature") 
 
-    cdef _choose_split_feature():
+    # choose the best
+    cdef _choose_split_feature(
+                SplitRecord* best, 
+                SplitRecord* records,
+                int size,
+                double epsilon):
+        ''' Choose the best split feature ''' 
+        cdef int i, max_index = 0
+        cdef double max_improvement = -INFINITY
+
+        for i in range(size):
+            if records[i].improvement > max_improvement:
+                max_index = i
+                max_improvement = records[i].improvement 
+        
+        best[0] = records[max_index]
 
 cdef class ExpSplitter(Splitter):
 
     cdef _choose_split_point():
+        pass
+    
+    cdef _choose_split_feature(
+                SplitRecord* best, 
+                SplitRecord* records,
+                int size,
+                double epsilon):
 
-    cdef _choose_split_feature():
+        cdef SIZE_t index = 0      
+        index = draw_from_exponential_mech(
+                epsilon,
+                records, 
+                size,
+                criterion.sensitivity,
+                random)
+        
+        best[0] = records[index]
 
 cdef class DepthFirstNBTreeBuilder:
 
@@ -467,8 +539,9 @@ cdef class DepthFirstNBTreeBuilder:
     cdef __cinit__(int diffprivacy_mech,
                     double budget,
                     Splitter splitter,
-                    max_depth,
-                    max_candid_features):
+                    Tree    tree,
+                    SIZE_t max_depth,
+                    SIZE_t max_candid_features):
 
         self.diffprivacy_mech = diffprivacy_mech
         self.budget = budget
@@ -478,8 +551,9 @@ cdef class DepthFirstNBTreeBuilder:
         self.max_depth = max_depth  # verified by Classifier
         self.max_candid_features = max_candid_features # verified
 
-        self.tree =     # XXX ??? pass parameter from python
-   
+        self.tree = NULL    # XXX ??? pass parameter from python
+        self.data = NULL
+
     cdef _init_data(self, Data data, np.ndarray X, np.ndarray y, np.ndarray sample_weight=None, Feature* features):
 
         data.X = X
@@ -508,7 +582,7 @@ cdef class DepthFirstNBTreeBuilder:
 
         # set parameter for diffprivacy
         cdef DOUBLE_t budget = self.budget
-        cdef double epsilon_per_action
+        cdef double epsilon_per_action   # XXX ?
         printf("espilon per action is %d", epsilon_per_action)
 
         #######################
@@ -520,7 +594,8 @@ cdef class DepthFirstNBTreeBuilder:
         cdef SIZE_t max_depth_seen = -1 # record the max depth ever seen
         cdef SIZE_t start, end,
                     depth,
-                    parent, index,
+                    parent, 
+                    index,
                     n_node_features
         cdef SIZE_t n_node_samples,
                     noisy_n_node_samples
@@ -553,10 +628,9 @@ cdef class DepthFirstNBTreeBuilder:
                 n_node_features = stack_record.n_node_features 
 
                 n_node_samples = end - start
-                noisy_n_node_samples = noise(n_node_samples, epsilon_per_action)
-
+                noisy_n_node_samples = n_node_samples + noise(epsilon_per_action) 
                 # reset class distribution based on this node
-                # XXX: node_reset
+                # node_reset
                 #       fill label_total_count,
                 #       calculate weighted_n_node_samples
                 splitter.node_reset(start, end, &weighted_n_node_samples)
@@ -564,7 +638,7 @@ cdef class DepthFirstNBTreeBuilder:
                 # if leaf
                 if depth >= max_depth 
                     or n_node_features <= 0
-                    or noisy_n_node_samples ... :
+                    or noisy_n_node_samples ... : # XXX
                     
                     # leaf node
                     node_id = tree._add_node(
@@ -577,17 +651,19 @@ cdef class DepthFirstNBTreeBuilder:
                             n_node_samples,
                             weighted_n_node_samples # XXX
                             )
-                
+
+                    # XXX
+                    tree.nodes[node_id].values = <double*>calloc( data.n_outputs * data.max_n_classes, sizeof(double))
+
                     # store class distribution into node.values
-                    # TODO: node_value
-                    splitter.node_value(tree, node_id)
+                    splitter.node_value(tree.nodes[node_id].values)
+                    
                     # add noise to the class distribution
-                    # TODO: this is a generized verison
-                    noise_distribution(tree.node[node_id].values, epsilon_per_action)
+                    noise_distribution(epsilon_per_action, tree.nodes[node_id].values, self.data)
                 else:       
                     # inner node
                     # choose split feature
-                    # TODO: refine node_split
+                    # XXX: refine node_split
                     splitter.node_split( &split_record )
                 
                     node_id = tree._add_node(
@@ -603,14 +679,19 @@ cdef class DepthFirstNBTreeBuilder:
 
                     # push children into stack
                     split_feature = data.features[split_record.feature_index]   
-                   
+
+                    cdef SIZE_t start_i = 0,
+                                end_i   = 0
                     for index in range(split_feature.n_values):
+                        start_i = end_i
+                        end_i   = end_i + split_record.n_subnodes_samples[index]
+                        
                         rc = stack.push(
-                            split_record.starts[i], # start pos XXX
-                            split_record.ends[i],   # end pos   XXX
-                            depth+1,                # depth of this new node
-                            node_id,                # child's parent id
-                            index,                  # the index
+                            start_i,    # start pos
+                            end_i,      # end pos
+                            depth+1,    # depth of this new node
+                            node_id,    # child's parent id
+                            index,      # the index
                             n_node_features 
                             )
                     
@@ -622,7 +703,6 @@ cdef class DepthFirstNBTreeBuilder:
 
 
             # TODO: prune
-
 
 cdef class Tree:
 
@@ -734,5 +814,106 @@ cdef class Tree:
                 node_ids.data[i] = <SIZE_t>( node - self.nodes )
 
         return node_ids
+
+# Utils
+
+cdef double laplace(double b, UINT32_t* random_state) except -1 with gil:
+    # No diffprivacy
+    if epsilon <= 0.0:
+        return 0.0
+
+    cdef double uniform = rand_double(random_state)-0.5
+    if uniform > 0.0:
+        return -epsilon*np.log(1.0-2*uniform)
+    else:
+        return +epsilon*np.log(1.0+2*uniform) 
+
+cdef double noise(double epsilon):
+    return laplace(1.0/epsilon, random)
+
+cdef noise_distribution(double epsilon, double* dist, Data data):
+
+    cdef SIZE_t k, i
+    
+    cdef SIZE_t n_outputs = data.n_outputs
+    cdef SIZE_t* n_classes = data.n_classes
+    cdef SIZE_t stride = data.max_n_classes
+    cdef SIZE_t zero_cnt = 0
+
+    for k in range(n_outputs):
+        
+        for i in range(n_classes[k]):
+            dest[i] += noise(epsilon)
+
+        zero_cnt = 0
+        for i in range(n_classes[k]):
+            if dest[i] <= 0.0:
+               dest[i] = 0.0
+               zero_cnt += 1
+        if zero_cnt ==  n_classes[k]:
+            dest[rand_int(n_classes[k],random_state)] = 1.0
+
+        dest += stride
+
+
+cdef int draw_from_distribution(double* dist, int size, UINT32_t* random_state) nogil except -1 :
+    """ numbers in arr should be greater than 0 """
+
+    cdef double total = 0.0, 
+                point = 0.0, 
+                current = 0.0 
+
+    cdef int i = 0
+    for i in range(size):
+        
+        if dist[i] < 0.0:
+            with gil:
+                raise("numbers in dist should be greater than 0, but dist[",i,"]=", dist[i], "is not.")
+            #return -1
+
+    # if numbers in arr all equal to 0
+    if total == 0.0:
+        return rand_int(n,random_state)
+
+    dist[i] = dist[i]/total
+
+    point = rand_double(random_state)
+
+    i = 0
+    for i in range(size):
+        current += dist[i]
+        if current > point:
+            return i
+
+    return n-1
+
+
+cdef int draw_from_exponential_mech(double epsilon, SplitRecord* records, int size, double sensitivity, random):
+
+    cdef double* improvements
+    cdef double max_improvement = -INFINITY
+    cdef int i
+    cdef int ret_idx
+
+    improvements = <double*> calloc(size, sizeof(double))
+    
+    i = 0
+    for i in range(size):
+        improvements[i] = records[i].improvement
+        if improvements[i] > max_improvement:
+            max_improvement = improvements[i]
+
+    with gil:
+        # rescale from 0 to 1
+        i = 0
+        for i in range(size):
+            improvements[i] -= max_improvement
+            improvements[i] = np.exp(improvements[i]*epsilon/(2*sensitivity))
+
+    ret_idx = draw_from_distribution(improvements, n_split_points, random_state)
+
+    free(improvements)
+
+    return ret_idx
 
 

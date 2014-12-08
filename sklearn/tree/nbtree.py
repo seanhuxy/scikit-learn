@@ -7,6 +7,11 @@ THis module implement no binary tree classifier
 import numpy as np
 
 
+CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy }
+SPLITTERS = { "lap": _nbtree.LapSplitter,
+              "exp": _nbtree.ExpSplitter }
+
+
 class FeatureParser
     def __init__(self):
         pass
@@ -74,8 +79,18 @@ class NbTreeClassifier
         fparser = FeatureParser()
         self._features = FeatureParser.parser(X)
 
-        criterion = 
-        splitter  = Splitter()
+        self.data = # XXX
+
+        criterion = self.criterion
+        if not isinstance(criterion, Criterion):
+            criterion = CRITERIA_CLF[self.criterion](self.data)
+
+        splitter  = self.splitter
+        if not isinstance(splitter, Splitter):
+            splitter = SPLITTERS[self.splitter]
+                (criterion, max_candid_features, random) # XXX 
+
+        tree = Tree(data.n_features, data.n_classes, data.n_outputs)
 
         builder = TreeBuilder(self.diffprivacy_mech,
                               self.budget,
