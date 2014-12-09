@@ -44,9 +44,9 @@ cdef class Data:
     SIZE_t    y_stride
     SIZE_t    n_outputs
     np.ndarray[SIZE_t, ndim=1] n_classes 
-    SIZE_t    max_labels    # max(number of distinct class label)
+    SIZE_t    max_n_classes    # max(number of distinct class label)
 
-    SIZE_t    max_feature_values # max(number of distint values of all feature)
+    SIZE_t    max_n_feature_values # max(number of distint values of all feature)
 
     SIZE_t  n_samples 
     SIZE_t  weighted_n_samples 
