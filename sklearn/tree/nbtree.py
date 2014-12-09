@@ -16,7 +16,7 @@ __all__ = ["NbTreeClassifier"]
 # Types and constants
 # =================================================================
 
-DTYPE = _tree.DTYPE
+DTYPE = _tree.DTYPE     # XXX
 DOUBLE = _tree.DOUBLE
 
 CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy }
@@ -78,7 +78,6 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         self.max_candid_features = max_candid_features 
 
         # inner structure
-        self._features = None
         self._tree = None
 
     def _set_data(self, X, y, sample_weight):
@@ -137,16 +136,25 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         data.y = y
         data.sample_weight = sample_weight
 
+        data.X_sample_stride = X.data.strides[0]/X.data.itemsize
+        data.X_feature_stride = X.data.strides[1]/X.data.itemsize
+        data.y_stride = y.data.strides[0] /y.data.itemsize
+        
         data.n_samples = n_samples
         data.weighted_n_samples = weighted_n_samples
 
         data.n_features = n_features
         data.features = FeatureParser.parser(X) # XXX array of Feature
 
-        # max_n_feature_values
+        max_n_feature_values = 0
+        n_continuous_features = 0
         for i in range(n_features):
             if features[i].n_values > max_n_feature_values:
                 max_n_feature_values = features[i].n_values
+            if features[i].type == FEATURE_CONTINUOUS:
+                n_continuous_features += 1
+        data.max_n_feature_values = max_n_feature_values
+        data.n_continuous_features = n_continuous_features
 
         # classes
         data.n_outputs = n_outputs
@@ -183,13 +191,14 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                 (criterion, max_candid_features, random_state)  
 
         tree = Tree(data.n_features, data.n_classes, data.n_outputs)
-        self.tree_ = tree
+        self._tree = tree
 
         builder = TreeBuilder(diffprivacy_mech,
                               budget,
                               splitter,
                               max_depth,
-                              max_candid_features)
+                              max_candid_features,
+                              random_state)
 
         # 4. build tree
         builder.build( tree, data )
@@ -221,7 +230,7 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
 
         n_samples, n_features = X.shape
 
-        if self.tree_ is None:
+        if self._tree is None:
             raise Exception("Tree not initialized. Perform a fit first")
 
         if self.data.n_features != n_features:
@@ -230,7 +239,7 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                              " input n_features is %s "
                              % (self.data.n_features, n_features))
 
-        proba = self.tree_.predict(X)
+        proba = self._tree.predict(X)
 
         # Classification
         if isinstance(self, ClassifierMixin):

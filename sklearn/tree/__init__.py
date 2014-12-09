@@ -10,5 +10,9 @@ from .tree import ExtraTreeRegressor
 from .tree import DiffPrivacyDecisionTreeClassifier
 from .export import export_graphviz
 
+from .nbtree import NBTreeClassifier
+
 __all__ = ["DecisionTreeClassifier", "DecisionTreeRegressor", "DiffPrivacyDecisionTreeClassifier",
-           "ExtraTreeClassifier", "ExtraTreeRegressor", "export_graphviz"]
+           "ExtraTreeClassifier", "ExtraTreeRegressor", "export_graphviz",
+           "NBTreeClassifier"
+           ]

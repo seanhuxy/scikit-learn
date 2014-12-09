@@ -20,6 +20,19 @@ def configuration(parent_package="", top_path=None):
                          libraries=libraries,
                          extra_compile_args=["-O3"])
 
+    config.add_extension("_nbtree",
+                         sources=["_nbtree.c"],
+                         include_dirs=[numpy.get_include()],
+                         libraries=libraries,
+                         extra_compile_args=["-O3"])
+
+    config.add_extension("_nbutils",
+                         sources=["_nbutils.c"],
+                         include_dirs=[numpy.get_include()],
+                         libraries=libraries,
+                         extra_compile_args=["-O3"])
+
+
     config.add_subpackage("tests")
 
     return config

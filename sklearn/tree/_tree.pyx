@@ -2025,5 +2025,6 @@ cdef inline double rand_double(UINT32_t* random_state) nogil:
     """Generate a random double in [0; 1)."""
     return <double> our_rand_r(random_state) / <double> RAND_R_MAX
 
+
 cdef inline double log(double x) nogil:
     return ln(x) / ln(2.0)
