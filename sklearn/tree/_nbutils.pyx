@@ -32,7 +32,8 @@ cdef class Stack:
             return 0
 
 
-    cdef int push(self, StackRecord sr) nogil:
+    cdef int push(self, SIZE_t start, SIZE_t end, SIZE_t depth, 
+                SIZE_t node_id, SIZE_t index, SIZE_t n_node_features) nogil:
         cdef StackRecord* stack = NULL
         cdef SIZE_t top = self.top
 
@@ -41,7 +42,12 @@ cdef class Stack:
                 return -1
         
         stack = self.stack_
-        stack[top] = sr # XXX
+        stack[top].start = start
+        stack[top].end   = end
+        stack[top].depth = depth
+        stack[top].parent= parent
+        stack[top].index = index
+        stack[top].n_node_features = n_node_features
        
         self.top = top + 1
         return 0 

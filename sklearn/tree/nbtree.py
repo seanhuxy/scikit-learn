@@ -83,7 +83,7 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
     def _set_data(self, X, y, sample_weight):
 
         # XXX what it did ?
-        X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
+        # X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
 
         n_samples, n_features = X.shape
       
@@ -185,12 +185,12 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         diffprivacy = self.diffprivacy
         budget = self.budget
        
-        criterion = CRITERIA_CLF[self.criterion](self.data)
+        criterion = CRITERIA_CLF[self.criterion](data, random_state)
 
         splitter = SPLITTERS[ diffprivacy ]
                 (criterion, max_candid_features, random_state)  
 
-        tree = Tree(data.n_features, data.n_classes, data.n_outputs)
+        tree = Tree(data.features, data.n_features, data.n_classes, data.n_outputs)
         self._tree = tree
 
         builder = TreeBuilder(diffprivacy_mech,

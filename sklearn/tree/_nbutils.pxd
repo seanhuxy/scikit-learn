@@ -21,7 +21,9 @@ cdef class Stack:
 
     cdef bint is_empty(self) nogil
 
-    cdef int push(self, StackRecord sr) nogil
+    #cdef int push(self, StackRecord sr) nogil
+    cdef int push(self, SIZE_t start, SIZE_t end, SIZE_t depth,
+            SIZE_t node_id, SIZE_t index, SIZE_t n_node_features) nogil
     cdef int pop(self, StackRecord* sr) nogil
 
 

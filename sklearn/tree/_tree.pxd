@@ -222,3 +222,14 @@ cdef class TreeBuilder:
 
     cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
                 np.ndarray sample_weight=*)
+
+ctypedef fused realloc_ptr:
+    # Add pointer types here as needed.
+    (DTYPE_t*)
+    (SIZE_t*)
+    (unsigned char*)
+
+cdef realloc_ptr safe_realloc(realloc_ptr* p, size_t nelems)
+cdef inline void sort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil
+cdef inline SIZE_t rand_int(SIZE_t end, UINT32_t* random_state) nogil
+cdef inline double rand_double(UINT32_t* random_state) nogil

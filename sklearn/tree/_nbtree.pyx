@@ -1,17 +1,73 @@
 from libc.stdio cimport printf
-from libc.stdio cimport calloc, free, realloc
+from libc.stdlib cimport calloc, free, realloc
 from libc.string cimport memcpy, memset
-from libc.math   cimport log, exp
+from libc.math   cimport log, exp, sqrt
 from cpython cimport Py_INCREF, PyObject
 
 from sklearn.tree._nbutils cimport Stack, StackRecord
 
-from sklearn.tree._tree cimport safe_realloc, sort # XXX
+from sklearn.tree._tree cimport sort, rand_int, rand_double # XXX
 
 import numpy as np
 cimport numpy as np
-from numpy.random import RandomState
 np.import_array() # XXX
+
+cdef extern from "numpy/arrayobject.h":
+    object PyArray_NewFromDescr(object subtype, np.dtype descr,
+                                int nd, np.npy_intp* dims,
+                                np.npy_intp* strides,
+                                void* data, int flags, object obj)
+
+cdef double INFINITY = np.inf
+
+cdef enum: 
+    _TREE_UNDEFINED = -1
+
+cdef SIZE_t INITIAL_STACK_SIZE = 10
+
+cdef DTYPE_t FEATURE_THRESHOLD = 1e-7
+
+cdef enum:
+    # Max value for our rand_r replacement (near the bottom).
+    # We don't use RAND_MAX because it's different across platforms and
+    # particularly tiny on Windows/MSVC.
+    RAND_R_MAX = 0x7FFFFFFF
+
+# Repeat struct definition for numpy
+NODE_DTYPE = np.dtype({
+    'names': ['parent', 'is_leaf', 'feature', 'threshold', 
+                'children', 'n_children','impurity',
+              'values', 'n_node_samples', 'weighted_n_node_samples'],
+    'formats': [np.intp, np.bool_, np.intp, np.float64, 
+                np.intp, np.intp, np.float64, 
+                np.intp, np.intp, np.float64],
+    'offsets': [
+        <Py_ssize_t> &(<Node*> NULL).parent,
+        <Py_ssize_t> &(<Node*> NULL).is_leaf,
+        <Py_ssize_t> &(<Node*> NULL).feature,
+        <Py_ssize_t> &(<Node*> NULL).threshold,
+        <Py_ssize_t> &(<Node*> NULL).children,
+        <Py_ssize_t> &(<Node*> NULL).n_children,
+        <Py_ssize_t> &(<Node*> NULL).impurity,
+        <Py_ssize_t> &(<Node*> NULL).values,
+        <Py_ssize_t> &(<Node*> NULL).n_node_samples,
+        <Py_ssize_t> &(<Node*> NULL).weighted_n_node_samples
+    ]
+})
+
+
+cdef enum:
+    NO_DIFF_PRIVACY_MECH  = 0
+    LAP_DIFF_PRIVACY_MECH = 1
+    EXP_DIFF_RPIVACY_MECH = 2
+
+    NO_DIFF_PRIVACY_BUDGET = -1
+
+    NO_THRESHOLD = -1
+
+    NO_FEATURE = -1
+    FEATURE_CONTINUOUS = 0
+    FEATURE_DISCRETE   = 1
 
 # ====================================================================
 # Criterion
@@ -19,7 +75,7 @@ np.import_array() # XXX
 
 cdef class Criterion:
 
-    def __cinit__(self, Data data):
+    def __cinit__(self, Data data, object random_state):
         '''
             allocate:
                 label_count,
@@ -29,28 +85,30 @@ cdef class Criterion:
                 label_count_stride, = max_n_classes 
                 feature_stride,     = max_n_classes * n_outputs 
         '''
+        self.random_state = random_state 
+        self.rand_r_state = random_state.randint(0, RAND_R_MAX)
+       
         self.data = data
 
-        self.samples = NULL
+        # self.samples_win = NULL
 
         self.start = 0
         self.end   = 0
 
         self.label_count_stride = data.max_n_classes 
 
-        cdef SIZE_t feature_stride = n_outputs * label_count_stride
+        cdef SIZE_t feature_stride = data.n_outputs * self.label_count_stride
         
-        self.label_count_total 
-            = <double*> calloc(feature_stride, sizeof(double))
-        self.label_count 
-            = <double*> calloc(feature_stride*data.max_n_feature_values, sizeof(double))
+        self.label_count_total = <DOUBLE_t*> calloc(feature_stride, sizeof(DOUBLE_t))
+        self.label_count = <DOUBLE_t*> calloc(feature_stride*data.max_n_feature_values, sizeof(DOUBLE_t))
         self.feature_stride = feature_stride
 
-        if self.label_count_total == NULL 
-        or self.label_count == NULL:
+        if self.label_count_total == NULL or self.label_count == NULL:
             raise MemoryError()
 
-    def void init(self, 
+        self.sensitivity = 2.0   # gini
+
+    cdef void init(self, 
                    Data      data,
                    SIZE_t*   samples_win, 
                    SIZE_t    start, 
@@ -72,15 +130,15 @@ cdef class Criterion:
         self.n_node_samples = end - start
       
         # XXX shallow copy Data structure
-        Data data = self.data
+        #cdef Data data = self.data
 
         # fill label_count_total and weighted_n_node_samples
         cdef SIZE_t n_outputs  = data.n_outputs
         cdef SIZE_t* n_classes = data.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
         
-        cdef double* label_count_total = self.label_count_total
-        cdef double weighted_n_node_samples = 0.0
+        cdef DOUBLE_t* label_count_total = self.label_count_total
+        cdef DOUBLE_t weighted_n_node_samples = 0.0
         
         cdef SIZE_t i = 0
         cdef SIZE_t p = 0
@@ -91,7 +149,7 @@ cdef class Criterion:
 
         # clear label_count_total 
         for k in range(n_outputs):
-            memset(label_count_total + offset, 0, n_classes[k] * sizeof(double))
+            memset(label_count_total + offset, 0, n_classes[k] * sizeof(DOUBLE_t))
             offset += label_count_stride
 
         # update class distribution (label_count_total)
@@ -103,27 +161,29 @@ cdef class Criterion:
                 w = data.sample_weight[i]
 
             for k in range(n_outputs):
-                c = <SIZE_t> y[ i*y_stride + k]    # y[i,k] 
+                c = <SIZE_t> data.y[ i*data.y_stride + k]    # y[i,k] 
                 label_count_total[k * label_count_stride + c] += w # label_count_total[k,c] 
 
             weighted_n_node_samples += w
 
         self.weighted_n_node_samples = weighted_n_node_samples
 
-    def void update(self,
+    cdef void update(self,
             SIZE_t* samples_win,
             SplitRecord split_record, 
-            double* Xf  
+            DOUBLE_t* Xf  
             ) nogil:       
         '''
         udpate:
             label_count, array[n_subnodes][n_outputs][max_n_classes]
         '''
-        cdef Feature* feature = &self.data.features[split.feature_index]
-        
+        cdef Feature* feature = &self.data.features[split_record.feature_index]
+       
+        cdef Data data = self.data
         cdef SIZE_t start = self.start
         cdef SIZE_t end   = self.end
 
+        cdef DOUBLE_t* label_count = self.label_count 
         cdef SIZE_t feature_stride = self.feature_stride 
         cdef SIZE_t label_count_stride = self.label_count_stride
         cdef SIZE_t class_label
@@ -135,8 +195,8 @@ cdef class Criterion:
         for p in range(start, end):
             s_i = samples_win[p]
            
-            if self.data.sample_weight != NULL:
-                w = self.data.sample_weight[s_i]
+            if data.sample_weight != NULL:
+                w = data.sample_weight[s_i]
             else:
                 w = 1.0
 
@@ -150,21 +210,21 @@ cdef class Criterion:
                     else:
                         f_i = 1
                 else:
-                    f_i = Xf[p]
-
-                label_index = f_i * feature_stride            # label_count[ f_i, k, label ]
-                            + k   * label_count_stride
-                            + class_label
-
+                    f_i = <SIZE_t>Xf[p] # XXX type conversion
+                
+                # label_count[ f_i, k, label ]
+                label_index = f_i*feature_stride + k*label_count_stride + class_label
                 label_count[label_index] += w
 
     # gini
-    def double node_impurity(self, double* label_count, SIZE_t wn_samples, double epsilon):
+    cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) nogil:
 
-        cdef double* label_count = label_count 
-        cdef SIZE_t wn_samples = wn_samples + noise(epsilon, self.random_state) # XXX
+        cdef UINT32_t* rand = &self.rand_r_state
 
-        cdef double total, gini, count
+        #cdef DOUBLE_t* label_count = label_count 
+        wn_samples += noise(epsilon, rand) # XXX
+
+        cdef DOUBLE_t total, gini, count
         cdef SIZE_t k, c
         cdef SIZE_t n_outputs = self.data.n_outputs 
         cdef SIZE_t* n_classes = self.data.n_classes 
@@ -175,7 +235,7 @@ cdef class Criterion:
             gini = 0.0
 
             for c in range(n_classes[k]):
-                count = label_count[c] + noise(epsilon, self.random_state) # XXX
+                count = label_count[c] + noise(epsilon, rand) # XXX
                 gini += (count*count) / wn_samples 
             
             total += gini
@@ -184,13 +244,13 @@ cdef class Criterion:
         return total / n_outputs 
 
 
-    def double improvement(self, SIZE_t* wn_subnodes_samples, SIZE_t n_subnodes, double epsilon):
+    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, DOUBLE_t epsilon) nogil:
         '''
         calculate improvement based on class distribution
         '''
-        cdef double* label_count = self.label_count
+        cdef DOUBLE_t* label_count = self.label_count
        
-        cdef double improvements = 0
+        cdef DOUBLE_t improvement = 0
 
         cdef SIZE_t i = 0
         # sum up node_impurity of each subset 
@@ -200,19 +260,18 @@ cdef class Criterion:
 
         return improvement
 
-    def void node_value(self, double* dist):
+    cdef void node_value(self, DOUBLE_t* dest) nogil:
         '''
         return class distribution of node, i.e. label_count_total
         '''
-        cdef SIZE_t n_outputs = self.data.n_outputs,
-                    n_classes = self.data.n_classes
-                    label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total 
-
+        cdef SIZE_t n_outputs = self.data.n_outputs
+        cdef SIZE_t* n_classes = self.data.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef DOUBLE_t* label_count_total = self.label_count_total 
 
         cdef SIZE_t k
         for k in range(n_outputs):
-            memcpy(dest, label_count_total, n_classes[k] * sizeof(double))
+            memcpy(dest, label_count_total, n_classes[k] * sizeof(DOUBLE_t))
 
             dest += label_count_stride
             label_count_total += label_count_stride 
@@ -226,19 +285,21 @@ cdef inline void _init_split(SplitRecord* self) nogil:
     self.improvement = -INFINITY
 
     self.n_subnodes = 0
-    self.n_subnodes_samples = None
-    self.wn_subnodes_samples = None
+    self.n_subnodes_samples = NULL
+    self.wn_subnodes_samples = NULL
 
 cdef class Splitter:
 
     def __cinit__(self,
                     Criterion criterion,
                     SIZE_t max_candid_features,
-                    RandomState random_state):
+                    object random_state):
         self.criterion = criterion
-        self.data = None       
-        self.random_state = random_state 
+        # self.data = None #XXX
         
+        self.random_state = random_state 
+        self.rand_r_state = random_state.randint(0, RAND_R_MAX)
+
         self.samples_win = NULL
         self.start = 0
         self.end   = 0
@@ -255,7 +316,7 @@ cdef class Splitter:
         free(self.feature_values)
 
     cdef void init(self, 
-            Data data):
+            Data data) except *:
         ''' set data
             alloc samples_win, features_win, feature_values
         '''
@@ -269,18 +330,17 @@ cdef class Splitter:
 
         # set features window
         cdef SIZE_t  n_features = data.n_features
-        cdef SIZE_t* features_win 
-                = safe_realloc (&self.features_win, n_features)
+        cdef SIZE_t* features_win = safe_realloc(&self.features_win, n_features)
         for i in range(n_features):
             features_win[i] = i
 
-        safe_realloc(&self.feature_values, n_samples)
+        safe_realloc(&self.feature_values, n_samples) # XXX why error
 
         # set data
         self.data = data
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end, 
-                    double* weighted_n_node_samples) nogil:
+                    DOUBLE_t* weighted_n_node_samples) nogil:
         ''' call once for each node 
             set start, end, 
             return weighted_n_node_samples'''        
@@ -288,35 +348,36 @@ cdef class Splitter:
         self.start = start
         self.end   = end
 
-        self.criterion.init(
-                            self.data,
-                            self.samples,
+        self.criterion.init(self.data,
+                            self.samples_win,
                             start,
                             end)
 
         weighted_n_node_samples[0] = self.criterion.weighted_n_node_samples
 
-    cdef void _choose_split_point(self):
+    cdef void _choose_split_point(self) nogil:
         pass
 
-    cdef void _choose_split_feature(self, SplitRecord* split_record, 
-                            SIZE_t n_node_features, double epsilon):
+    cdef void _choose_split_feature(self,
+            SplitRecord* best,
+            SplitRecord* split_records, 
+            SIZE_t size, 
+            DOUBLE_t epsilon) nogil:
         pass
 
     cdef void node_split(self, 
             SplitRecord* split_record, 
             SIZE_t* n_node_features,
-            double epsilon):
+            DOUBLE_t epsilon):
         ''' 
             Calculate:
                 best feature for split,
                 best split point (for continuous feature)
         '''
         # create and init split records
-        cdef SplitRecord* feature_records 
-                = <SplitRecord*> calloc(n_node_features[0], sizeof(SplitRecord))
+        cdef SplitRecord* feature_records = <SplitRecord*> calloc(n_node_features[0], sizeof(SplitRecord))
         cdef SIZE_t i
-        for i in range(n_features):
+        for i in range(n_node_features[0]):
             _init_split(&feature_records[i])
 
         cdef SplitRecord current, best
@@ -324,21 +385,24 @@ cdef class Splitter:
         _init_split(&best)
 
         cdef Data data = self.data
-        cdef SIZE_t samples_win = self.samples_win
+        cdef SIZE_t* samples_win = self.samples_win
 
         cdef Feature* feature
         cdef SIZE_t* features_win = self.features_win 
         cdef SIZE_t f_i = n_node_features[0]-1
-                    f_j = 0
+        cdef SIZE_t f_j = 0
 
         cdef DOUBLE_t* Xf = self.feature_values
         cdef SIZE_t start = self.start,
-                    end   = self.end
-    
+        cdef SIZE_t end   = self.end
+        cdef DOUBLE_t w   = 0.0
+
+        cdef SIZE_t* n_subnodes_samples
+        cdef DOUBLE_t* wn_subnodes_samples
 
         while f_j <= f_i :
-            _init_split(current)
-            current.feature_index = features_window[f_j]
+            _init_split(&current)
+            current.feature_index = features_win[f_j]
             feature = &data.features[current.feature_index]
 
             # copy to Xf
@@ -349,78 +413,83 @@ cdef class Splitter:
                      +  current.feature_index * data.X_feature_stride ]
             
             # TODO use _tree.py sort() 
-            sort(Xf+start, samples+start, end-start)
+            # XXX type conversion
+            sort(<DTYPE_t*>(Xf+start), samples_win+start, end-start)
+    
 
             # if constant feature
             if Xf[end-1] <= Xf[start] + FEATURE_THRESHOLD:
                 features_win[f_j] = features_win[f_i]
                 features_win[f_i] = current.feature_index 
-                f_i --
+                f_i -= 1
                 # goes to next candidate feature
             
             # not constant feature
             else:                
                 # if continuous feature
                 if feature.type == FEATURE_CONTINUOUS:
-                    raise("Warning, node_split not support continuous feature") 
+                    raise ValueError("Warning, node_split not support continuous feature") 
                     current.n_subnodes = 2
                     
                     # TODO set threshold, 
-                    _choose_split_point(&current)
+                    self._choose_split_point(&current)
                 
                     # set  n_subnodes_samples
                     # set wn_subnodes_samples
                     
                 else:
                     current.n_subnodes = feature.n_values
-
-                    n_subnodes_samples  = <SIZE_t*> safe_realloc(current.n_subnodes_samples,  feature.n_values)
-                    wn_subnodes_samples = <SIZE_t*> safe_realloc(current.wn_subnodes_samples, feature.n_values)
+                    
+                    # XXX error?
+                    n_subnodes_samples  = safe_realloc(&current.n_subnodes_samples,  current.n_subnodes)
+                    wn_subnodes_samples = safe_realloc(&current.wn_subnodes_samples, current.n_subnodes)
                     
                     for i in range(start,end):
-                        if data.samples_weight == NULL:
+                        if data.sample_weight == NULL:
                             w = 1.0
                         else:
                             w = data.sample_weight[ i ]
 
-                        n_subnodes_samples[ Xf[i] ] ++
-                        wn_subnodes_samples[ Xf[i] ] += w
+                        # XXX type convert
+                        n_subnodes_samples [ <SIZE_t>Xf[i] ] += 1 
+                        wn_subnodes_samples[ <SIZE_t>Xf[i] ] += w
 
-                # 
+                 
                 self.criterion.update(samples_win, current, Xf)
-                current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_subnodes)
+                current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_subnodes, epsilon)
 
                 feature_records[f_j] = current
-                if current.improvement > best.improvement
+                if current.improvement > best.improvement:
                     best = current
 
-                f_j ++
+                f_j += 1
 
-        _choose_split_feature(&best, 
+        self._choose_split_feature(&best, 
                             feature_records, 
                             f_i, 
-                            epsilon_per_action)
+                            epsilon)
 
         split_record[0]    = best
         n_node_features[0] = f_i+1 
 
-    cdef void node_value(self,double* dest) nogil:
+    cdef void node_value(self,DOUBLE_t* dest) nogil:
         self.criterion.node_value(dest)
 
 cdef class LapSplitter(Splitter):
 
-    cdef void _choose_split_point(self):
-        raise("Laplace mech doesn't support continuous feature") 
+    cdef void _choose_split_point(self) nogil:
+        with gil:
+            raise("Laplace mech doesn't support continuous feature") 
         
     # choose the best
     cdef void _choose_split_feature(self,
                 SplitRecord* best, 
                 SplitRecord* records,
-                int size,
-                double epsilon):
+                SIZE_t size,
+                DOUBLE_t epsilon) nogil:
         ''' Choose the best split feature ''' 
-        cdef int i, max_index = 0
-        cdef double max_improvement = -INFINITY
+        cdef SIZE_t i, max_index = 0
+        cdef DOUBLE_t max_improvement = -INFINITY
 
         for i in range(size):
             if records[i].improvement > max_improvement:
@@ -431,33 +500,36 @@ cdef class LapSplitter(Splitter):
 
 cdef class ExpSplitter(Splitter):
 
-    cdef void _choose_split_point(self):
+    cdef void _choose_split_point(self) nogil:
         pass
     
     cdef void _choose_split_feature(self,
                 SplitRecord* best, 
                 SplitRecord* records,
-                int size,
-                double epsilon):
+                SIZE_t size,
+                DOUBLE_t epsilon) nogil:
+
+        cdef UINT32_t* rand = &self.rand_r_state
 
         cdef SIZE_t index = 0      
         index = draw_from_exponential_mech(
                 epsilon,
                 records, 
                 size,
-                criterion.sensitivity,
-                self.random_state)
+                self.criterion.sensitivity,
+                rand)
         
         best[0] = records[index]
 
 cdef class NBTreeBuilder:
 
-    cdef __cinit__(int diffprivacy_mech,
-                    double budget,
+    def __cinit__(self, 
+                    SIZE_t diffprivacy_mech,
+                    DOUBLE_t budget,
                     Splitter splitter,
                     SIZE_t max_depth,
                     SIZE_t max_candid_features,
-                    RandomState random_state
+                    object random_state
                     ):
 
         self.diffprivacy_mech = diffprivacy_mech
@@ -468,39 +540,46 @@ cdef class NBTreeBuilder:
         self.max_depth = max_depth  # verified by Classifier
         self.max_candid_features = max_candid_features # verified
 
-        self.tree = NULL    # XXX ??? pass parameter from python
-        self.data = NULL
+        # self.tree = None    # XXX ??? pass parameter from python
+        # self.data = None
         
         self.random_state = random_state
+        self.rand_r_state = random_state.randint(0, RAND_R_MAX)
 
     cpdef build(self,
                 Tree    tree,
                 Data    data):
+       
+        #self.data = data
         
+        cdef UINT32_t* rand = &self.rand_r_state
+
         cdef Splitter splitter = self.splitter
 
-        cdef Data data = data
-        self.data = data
-        
-        cdef Tree tree = tree
-        _init_tree(tree, max_depth) # init tree capacity based on max_depth
-        self.tree = tree
-        
+       
         # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
         cdef SIZE_t max_candid_features = self.max_candid_features
 
+        # Initial capacity of tree
+        cdef int init_capacity
+        if max_depth <= 10:
+            init_capacity = (2 ** (max_depth + 1)) - 1
+        else:
+            init_capacity = 2047
+        tree._resize(init_capacity)
+        self.tree = tree
+ 
         # set parameter for diffprivacy
         cdef DOUBLE_t budget = self.budget
         cdef SIZE_t diffprivacy_mech = self.diffprivacy_mech
-        cdef double epsilon_per_depth = 0.0
-        cdef double epsilon_per_action= 0.0   
+        cdef DOUBLE_t epsilon_per_depth = 0.0
+        cdef DOUBLE_t epsilon_per_action= 0.0   
         if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
             epsilon_per_depth = budget/(max_depth+1)
             epsilon_per_action = epsilon_per_depth/2.0
-        elif diffprivacy_mech ==  EXP_DIFF_RPIVACY_MECH:
-            epsilon_per_action = 
-                budget/( (2+data.n_continuous_features)*max_depth + 2)
+        elif diffprivacy_mech == EXP_DIFF_RPIVACY_MECH:
+            epsilon_per_action = budget/( (2+data.n_continuous_features)*max_depth + 2)
         else:
             epsilon_per_action = NO_DIFF_PRIVACY_BUDGET
         
@@ -510,30 +589,39 @@ cdef class NBTreeBuilder:
         # recursively depth first build tree 
 
         splitter.init(data) # set samples_win, features_win
-        SplitRecord split_record 
+        cdef SplitRecord split_record 
 
         cdef SIZE_t max_depth_seen = -1 # record the max depth ever seen
-        cdef SIZE_t start, end, start_i, end_i,
-                    depth,
-                    parent, 
-                    index,
-                    n_node_features
+        cdef SIZE_t start
+        cdef SIZE_t end
+        cdef SIZE_t start_i
+        cdef SIZE_t end_i
+        cdef SIZE_t depth
+        cdef SIZE_t parent
+        cdef SIZE_t index
+        cdef SIZE_t n_node_features
         cdef SIZE_t n_node_samples
         cdef DOUBLE_t noisy_n_node_samples
+        cdef DOUBLE_t weighted_n_node_samples
         cdef SIZE_t node_id
 
         # init Stack structure
         cdef Stack stack = Stack(INITIAL_STACK_SIZE)
         cdef StackRecord stack_record
         # root node record
-        stack_record.start = 0
-        stack_record.end   = split.n_samples 
-        stack_record.depth = 0
-        stack_record.parent=_TREE_UNDEFINED
-        stack_record.index = 0
-        stack_record.n_node_features  = split.n_features
+        #stack_record.start = 0
+#        stack_record.end   = data.n_samples 
+#        stack_record.depth = 0
+#        stack_record.parent=_TREE_UNDEFINED
+#        stack_record.index = 0
+#        stack_record.n_node_features  = data.n_features
         # push root node into stack
-        rc = stack.push(stack_record)
+        rc = stack.push(0,              # start
+                        data.n_samples, # end
+                        0,              # depth
+                        _TREE_UNDEFINED,# parent
+                        0,              # index
+                        data.n_features)# n_node_features
 
         if rc == -1:
             raise MemoryError()
@@ -549,18 +637,17 @@ cdef class NBTreeBuilder:
                 n_node_features = stack_record.n_node_features 
 
                 n_node_samples = end - start
-                noisy_n_node_samples = double(n_node_samples) + noise(epsilon_per_action, self.random_state) # XXX
+                noisy_n_node_samples = <DOUBLE_t>n_node_samples + noise(epsilon_per_action, rand) # XXX
                 # reset class distribution based on this node
                 # node_reset
                 #       fill label_total_count,
                 #       calculate weighted_n_node_samples
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
-
                 # if leaf
-                if depth >= max_depth 
-                    or n_node_features <= 0
-                    or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < np.sqrt(2.0)/epsilon_per_action: # XXX
+                if (  depth >= max_depth 
+                   or n_node_features <= 0 
+                   or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action ) : # XXX
                     
                     # leaf node
                     node_id = tree._add_node(
@@ -575,18 +662,19 @@ cdef class NBTreeBuilder:
                             )
 
                     # XXX
-                    tree.nodes[node_id].values = <double*>calloc( data.n_outputs * data.max_n_classes, sizeof(double))
+                    tree.nodes[node_id].values = <DOUBLE_t*>calloc( data.n_outputs * data.max_n_classes, sizeof(DOUBLE_t))
 
                     # store class distribution into node.values
                     splitter.node_value(tree.nodes[node_id].values)
                     
                     # add noise to the class distribution
-                    noise_distribution(epsilon_per_action, tree.nodes[node_id].values, self.data, self.random_state)
+                    noise_distribution(epsilon_per_action, tree.nodes[node_id].values, data, rand)
                 else:       
                     # inner node
                     # choose split feature
                     # XXX: refine node_split
-                    splitter.node_split( &split_record, &n_node_features, epsilon_per_action )
+                    with gil:
+                        splitter.node_split( &split_record, &n_node_features, epsilon_per_action )
                 
                     node_id = tree._add_node(
                             parent,
@@ -594,7 +682,7 @@ cdef class NBTreeBuilder:
                             False,     # not leaf node
                             split_record.feature_index,
                             split_record.threshold,
-                            split_record.n_values,  # number of children
+                            split_record.n_subnodes,  # number of children
                             n_node_samples, 
                             weighted_n_node_samples # XXX
                             )
@@ -618,11 +706,20 @@ cdef class NBTreeBuilder:
                             )
                     
                         if rc == -1:
-                            raise MemoryError()
+                            break
+                            # raise MemoryError()
                             
                 if depth > max_depth_seen:
                     max_depth_seen = depth
 
+            if rc >= 0:
+                rc = tree._resize_c(tree.node_count)
+
+            if rc >= 0:
+                tree.max_depth = max_depth_seen
+        
+        if rc == -1:
+            raise MemoryError()
             # TODO: prune
 
 cdef class Tree:
@@ -647,10 +744,12 @@ cdef class Tree:
     '''
 
     def __cinit__(self,
-                int         n_features
+                Feature*       features,
+                SIZE_t         n_features,
                 np.ndarray[SIZE_t, ndim=1]  n_classes,
-                int                         n_outputs):
+                SIZE_t         n_outputs):
 
+        self.features = features
         self.n_features = n_features
         self.n_outputs  = n_outputs
         self.n_classes  = NULL
@@ -671,7 +770,7 @@ cdef class Tree:
         free(self.n_classes)
         free(self.nodes)
 
-    def void resize(self, SIZE_t capacity):
+    cdef void _resize(self, SIZE_t capacity):
         if self._resize_c(capacity) != 0:
             raise MemoryError()
     
@@ -703,13 +802,110 @@ cdef class Tree:
         self.capacity = capacity
         return 0
 
-    cdef SIZE_t _add_node(self, Node node) nogil:
-        pass:
+    cdef SIZE_t _add_node(self, 
+                          SIZE_t parent, 
+                          SIZE_t index,
+                          bint   is_leaf,
+                          SIZE_t feature, 
+                          DOUBLE_t threshold, 
+                          SIZE_t n_children,
+                          SIZE_t n_node_samples, 
+                          DOUBLE_t weighted_n_node_samples
+                          ) nogil:
+        """Add a node to the tree.
+        The new node registers itself as the child of its parent.
+        Returns (size_t)(-1) on error.
+        """
+        cdef SIZE_t node_id = self.node_count
+
+        if node_id >= self.capacity:
+            if self._resize_c() != 0:
+                return <SIZE_t>(-1)
+
+        cdef Node* node = &self.nodes[node_id]
+        
+        # node.impurity = impurity
+        node.n_children = n_children 
+        # node.index_children = 0
+        
+        if is_leaf and n_children == 0:
+            node.children = NULL
+        else:
+            node.children = <SIZE_t*>calloc(n_children, sizeof(SIZE_t))
+            if node.children == NULL: # XXX error
+                return <SIZE_t>(-1)
+        node.is_leaf = is_leaf
+
+        if parent != _TREE_UNDEFINED:
+            if self.nodes[parent].n_children <= index:
+                with gil:
+                   raise ValueError("index error")
+            self.nodes[parent].children[index]=node_id
+        
+        node.parent = parent
+        
+        node.feature = feature
+        node.threshold = threshold
+
+        node.n_node_samples = n_node_samples
+        node.weighted_n_node_samples = weighted_n_node_samples
+
+        self.node_count += 1
+        return node_id
 
     cpdef np.ndarray predict(self, np.ndarray[DTYPE_t, ndim=2] X):
         
-        out = self._get_value_ndarray().take(    
+        """Predict target for X."""
+        out = self._get_value_ndarray().take(self.apply(X), axis=0,
+                                             mode='clip')
+        if self.n_outputs == 1:
+            out = out.reshape(X.shape[0], self.max_n_classes)
         return out
+    
+    cdef np.ndarray _get_value_ndarray(self):
+        """Wraps value as a 3-d NumPy array
+
+        The array keeps a reference to this Tree, which manages the underlying
+        memory.
+        """
+        cdef np.npy_intp shape[3]
+        shape[0] = <np.npy_intp> self.node_count
+        shape[1] = <np.npy_intp> self.n_outputs
+        shape[2] = <np.npy_intp> self.max_n_classes
+#         ##################################3333         
+#         print("self.node_count")
+#         print(self.node_count)
+#         print("self.n_outputs")
+#         print(self.n_outputs)
+#         print("self.max_n_classes")
+#         print(self.max_n_classes)
+        
+        cdef np.ndarray arr  #dimension is shape[0] x [1] x [2]
+        arr = np.PyArray_SimpleNewFromData(3, shape, np.NPY_DOUBLE, self.value)
+        ###################3#add ref_count  ,so save referent data in the underlying memory
+        Py_INCREF(self)  
+        arr.base = <PyObject*> self
+        return arr
+
+    cdef np.ndarray _get_node_ndarray(self):
+        """Wraps nodes as a NumPy struct array
+
+        The array keeps a reference to this Tree, which manages the underlying
+        memory. Individual fields are publicly accessible as properties of the
+        Tree.
+        """
+        cdef np.npy_intp shape[1]
+        shape[0] = <np.npy_intp> self.node_count
+        cdef np.npy_intp strides[1]
+        strides[0] = sizeof(Node)
+        cdef np.ndarray arr
+        Py_INCREF(NODE_DTYPE)
+        arr = PyArray_NewFromDescr(np.ndarray, <np.dtype> NODE_DTYPE, 1, shape,
+                                   strides, <void*> self.nodes,
+                                   np.NPY_DEFAULT, None)
+        Py_INCREF(self)
+        arr.base = <PyObject*> self
+        return arr
 
     cpdef np.ndarray apply(self, np.ndarray[DTYPE_t, ndim=2] X):
 
@@ -724,13 +920,13 @@ cdef class Tree:
                 node = self.nodes
 
                 while node.is_leaf == False:
-                    if data.features[node.feature].type == FEATURE_CONTINUOUS:
+                    if self.features[node.feature].type == FEATURE_CONTINUOUS:
                         if X[i, node.feature] < node.threshold:
                             node = &self.nodes[node.children[0]]
                         else:
                             node = &self.nodes[node.children[1]]
                     else:
-                        node = &self.nodes[node.children[ X[i, node.feature] ]
+                        node = &self.nodes[node.children[ <SIZE_t>X[i, node.feature] ]]
 
                 node_ids.data[i] = <SIZE_t>( node - self.nodes )
 
@@ -740,26 +936,54 @@ cdef class Tree:
 # Utils
 # ========================================================================
 
-cdef double laplace(double b, RandomState rand) except -1 with gil:
+# safe_realloc(&p, n) resizes the allocation of p to n * sizeof(*p) bytes or
+# raises a MemoryError. It never calls free, since that's __dealloc__'s job.
+#   cdef DTYPE_t *p = NULL
+#   safe_realloc(&p, n)
+# is equivalent to p = malloc(n * sizeof(*p)) with error checking.
+ctypedef fused realloc_ptr:
+    # Add pointer types here as needed.
+    (DOUBLE_t*) # added
+    (DTYPE_t*)
+    (SIZE_t*)
+    (unsigned char*)
+
+cdef realloc_ptr safe_realloc(realloc_ptr* p, size_t nelems) except *:
+    # sizeof(realloc_ptr[0]) would be more like idiomatic C, but causes Cython
+    # 0.20.1 to crash.
+    cdef size_t nbytes = nelems * sizeof(p[0][0])
+    if nbytes / sizeof(p[0][0]) != nelems:
+        # Overflow in the multiplication
+        raise MemoryError("could not allocate (%d * %d) bytes"
+                          % (nelems, sizeof(p[0][0])))
+    cdef realloc_ptr tmp = <realloc_ptr>realloc(p[0], nbytes)
+    if tmp == NULL:
+        raise MemoryError("could not allocate %d bytes" % nbytes)
+
+    p[0] = tmp
+    return tmp  # for convenience
+
+cdef DOUBLE_t laplace(DOUBLE_t b, UINT32_t* rand) nogil except -1:
     # No diffprivacy
     if b <= 0.0:
         return 0.0
 
-    cdef double uniform = rand.rand()-0.5
+    cdef DOUBLE_t uniform = rand_double(rand)-0.5 # gil
     if uniform > 0.0:
-        return -epsilon*ln(1.0-2*uniform)
+        return -b*log(1.0-2*uniform)
     else:
-        return +epsilon*ln(1.0+2*uniform) 
+        return +b*log(1.0+2*uniform) 
 
-cdef double noise(double epsilon, RandomState rand):
+cdef DOUBLE_t noise(DOUBLE_t epsilon, UINT32_t* rand) nogil:
     if epsilon == NO_DIFF_PRIVACY_BUDGET:
         return 0.0
 
     return laplace(1.0/epsilon, rand)
 
-cdef void noise_distribution(double epsilon, double* dist, Data data, RandomState rand):
+cdef void noise_distribution(DOUBLE_t epsilon, DOUBLE_t* dest, Data data, UINT32_t* rand) nogil:
 
-    cdef SIZE_t k, i
+    cdef SIZE_t k = 0
+    cdef SIZE_t i = 0
     
     cdef SIZE_t n_outputs = data.n_outputs
     cdef SIZE_t* n_classes = data.n_classes
@@ -777,19 +1001,19 @@ cdef void noise_distribution(double epsilon, double* dist, Data data, RandomStat
                dest[i] = 0.0
                zero_cnt += 1
         if zero_cnt ==  n_classes[k]:
-            dest[rand_int(n_classes[k],random_state)] = 1.0
+            dest[rand_int(n_classes[k], rand)] = 1.0
 
         dest += stride
 
 
-cdef int draw_from_distribution(double* dist, int size, RandomState rand) nogil except -1 :
+cdef SIZE_t draw_from_distribution(DOUBLE_t* dist, SIZE_t size, UINT32_t* rand) nogil except -1:
     """ numbers in arr should be greater than 0 """
 
-    cdef double total = 0.0, 
-                point = 0.0, 
-                current = 0.0 
+    cdef DOUBLE_t total = 0.0
+    cdef DOUBLE_t point = 0.0 
+    cdef DOUBLE_t current = 0.0 
 
-    cdef int i = 0
+    cdef SIZE_t i = 0
     for i in range(size):
         
         if dist[i] < 0.0:
@@ -799,11 +1023,11 @@ cdef int draw_from_distribution(double* dist, int size, RandomState rand) nogil 
 
     # if numbers in arr all equal to 0
     if total == 0.0:
-        return rand.randint(n)
+        return rand_int(size, rand)
 
     dist[i] = dist[i]/total
 
-    point = rand.rand()
+    point = rand_double(rand)
 
     i = 0
     for i in range(size):
@@ -811,17 +1035,17 @@ cdef int draw_from_distribution(double* dist, int size, RandomState rand) nogil 
         if current > point:
             return i
 
-    return n-1
+    return size-1
 
 
-cdef int draw_from_exponential_mech(double epsilon, SplitRecord* records, int size, double sensitivity, RandomState rand):
+cdef SIZE_t draw_from_exponential_mech(double epsilon, SplitRecord* records, int size, double sensitivity, UINT32_t* rand) nogil except -1:
 
     cdef double* improvements
     cdef double max_improvement = -INFINITY
     cdef int i
     cdef int ret_idx
 
-    improvements = <double*> calloc(size, sizeof(double))
+    improvements = <double*>calloc(size, sizeof(double))
     
     i = 0
     for i in range(size):
@@ -829,14 +1053,13 @@ cdef int draw_from_exponential_mech(double epsilon, SplitRecord* records, int si
         if improvements[i] > max_improvement:
             max_improvement = improvements[i]
 
-    with gil:
-        # rescale from 0 to 1
-        i = 0
-        for i in range(size):
-            improvements[i] -= max_improvement
-            improvements[i] = exp(improvements[i]*epsilon/(2*sensitivity))
+    # rescale from 0 to 1
+    i = 0
+    for i in range(size):
+        improvements[i] -= max_improvement
+        improvements[i] = exp(improvements[i]*epsilon/(2*sensitivity))
 
-    ret_idx = draw_from_distribution(improvements, n_split_points, rand)
+    ret_idx = draw_from_distribution(improvements, size, rand)
 
     free(improvements)
 
