@@ -170,13 +170,14 @@ cdef struct Node:
     SIZE_t  feature     # Index of the feature used for splitting this node
     DOUBLE_t threshold  # (only for continuous feature) The splitting point
     
+    DOUBLE_t impurity   # reserved. Impurity of the node (i.e., the value of the criterion)
+    
     SIZE_t* children    # an array, storing ids of the children of this node
     SIZE_t  n_children  # size = feature.n_values
 
-    DOUBLE_t impurity   # reserved. Impurity of the node (i.e., the value of the criterion)
 #
     # For leaf node
-    DOUBLE_t* values    # (only for leaf node) Array of class distribution 
+    # DOUBLE_t* values    # (only for leaf node) Array of class distribution 
                         #   (n_outputs, max_n_classes)
     # SIZE_t  label       # class label, max_index(values)
 
@@ -187,23 +188,26 @@ cdef struct Node:
 cdef class Tree:
 
     # Input/Output layout
-    cdef Feature* features
+    cdef Feature* features          # XXX
+    
     cdef public SIZE_t n_features
     cdef SIZE_t* n_classes          # Number of diff labels of each class in y
     cdef public SIZE_t n_outputs    # Number of outputs in y
     cdef public SIZE_t max_n_classes# max(n_classes)
 
-    cdef public SIZE_t node_count   # Counter for node IDs
-    
+
     # Inner structures
+    cdef public SIZE_t capacity     # Capacity of trees
+    cdef public SIZE_t node_count   # Counter for node IDs
+    cdef Node*   nodes              # Array of nodes
+    cdef double* value              # Array of class distribution, (capacity, n_outputs, max_n_classes)
+    cdef SIZE_t value_stride        # = n_outputs*max_n_classes
+
 
     cdef public SIZE_t max_depth    # Max depth of the tree
-    cdef public SIZE_t capacity     # Capacity of trees
-
-    cdef Node* nodes                # Array of nodes
    
-    cdef void _resize(self, SIZE_t capacity)
 
+    cdef void _resize(self, SIZE_t capacity)
     cdef int _resize_c(self, SIZE_t capacity=*) nogil
 
     cdef SIZE_t _add_node(self, 
@@ -221,5 +225,6 @@ cdef class Tree:
     cdef np.ndarray _get_value_ndarray(self)
     cdef np.ndarray _get_node_ndarray(self)
     cpdef np.ndarray apply(self, np.ndarray[DTYPE_t, ndim=2] X)
+    # cpdef compute_feature_importances(self, normalize=*)
 
 

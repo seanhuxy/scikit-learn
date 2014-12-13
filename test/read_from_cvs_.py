@@ -3,7 +3,7 @@ from pandas.io.parsers import read_table
 
 import numpy as np
 
-import sklearn as sk
+#import sklearn as sk
 
 filename = "../dataset/simpleadult"
 
@@ -27,9 +27,9 @@ print data
 #print enc.n_values_
 #print enc.feature_indices_
 
-from sklearn.feature_extraction import DictVectorizer
-dv = DictVectorizer()
-data = dv.fit_transform(data)
-print data.shape
-print data[0]
-print data.toarray()
+#from sklearn.feature_extraction import DictVectorizer
+#dv = DictVectorizer()
+#data = dv.fit_transform(data)
+#print data.shape
+#print data[0]
+#print data.toarray()

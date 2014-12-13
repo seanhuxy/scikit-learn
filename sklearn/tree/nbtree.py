@@ -4,6 +4,7 @@ THis module implement no binary tree classifier
 import numbers
 import numpy as np
 
+from ._nbtree import FeatureParser
 from ._nbtree import Criterion
 from ._nbtree import Splitter
 from ._nbtree import NBTreeBuilder
@@ -26,28 +27,6 @@ SPLITTERS = { "lap": _nbtree.LapSplitter,
 # =================================================================
 # Tree
 # =================================================================
-
-class FeatureParser
-    def __init__(self):
-        pass
-
-    def parser(self, X):
-        '''
-        parse X
-
-        for continuous features, 
-
-        for discrete features,
-        using int represent, 
-        e.g. { Beijing, Shanghai, Hong Kong, Beijing }
-          -> {0,1,2,0}         
-        '''
-
-        return features, X
-    
-    def transform(self,X):
-        pass
-
 class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                                           _LearntSelectorMixin)): # XXX 
 
@@ -80,7 +59,7 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         # inner structure
         self._tree = None
 
-    def _set_data(self, X, y, sample_weight):
+    def _set_data(self, X, y, meta, sample_weight):
 
         # XXX what it did ?
         # X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
@@ -144,7 +123,8 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         data.weighted_n_samples = weighted_n_samples
 
         data.n_features = n_features
-        data.features = FeatureParser.parser(X) # XXX array of Feature
+        FeatureParser fp = FeatureParser
+        data.features = fp.feature_parser(meta) # XXX array of Feature
 
         max_n_feature_values = 0
         n_continuous_features = 0
@@ -166,13 +146,15 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
 
     def fit(self,
             X, y,
-            sample_weight = None):
+            meta,
+            sample_weight = None,
+            ):
        
         # random_state
         random_state = self.random_state
 
         # 1. set data
-        data = _set_data(X, y, sample_weight)
+        data = self._set_data(X, y, meta, sample_weight)
         self.data = data
 
         # 2. check parameter
@@ -193,7 +175,7 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         tree = Tree(data.features, data.n_features, data.n_classes, data.n_outputs)
         self._tree = tree
 
-        builder = TreeBuilder(diffprivacy_mech,
+        builder = NBTreeBuilder(diffprivacy_mech,
                               budget,
                               splitter,
                               max_depth,

@@ -35,21 +35,22 @@ cdef enum:
 
 # Repeat struct definition for numpy
 NODE_DTYPE = np.dtype({
-    'names': ['parent', 'is_leaf', 'feature', 'threshold', 
-                'children', 'n_children','impurity',
-              'values', 'n_node_samples', 'weighted_n_node_samples'],
-    'formats': [np.intp, np.bool_, np.intp, np.float64, 
-                np.intp, np.intp, np.float64, 
-                np.intp, np.intp, np.float64],
+    'names': [  'parent', 'is_leaf',      # XXX 
+                'feature', 'threshold', 'impurity',
+                'children', 'n_children', # XXX
+                'n_node_samples', 'weighted_n_node_samples'],
+    'formats': [np.intp, np.bool_, 
+                np.intp, np.float64, np.float64,
+                np.intp, np.intp,  
+                np.intp, np.float64],
     'offsets': [
         <Py_ssize_t> &(<Node*> NULL).parent,
-        <Py_ssize_t> &(<Node*> NULL).is_leaf,
+        <Py_ssize_t> &(<Node*> NULL).is_leaf,   # XXX
         <Py_ssize_t> &(<Node*> NULL).feature,
         <Py_ssize_t> &(<Node*> NULL).threshold,
-        <Py_ssize_t> &(<Node*> NULL).children,
+        <Py_ssize_t> &(<Node*> NULL).children,  # XXX
         <Py_ssize_t> &(<Node*> NULL).n_children,
         <Py_ssize_t> &(<Node*> NULL).impurity,
-        <Py_ssize_t> &(<Node*> NULL).values,
         <Py_ssize_t> &(<Node*> NULL).n_node_samples,
         <Py_ssize_t> &(<Node*> NULL).weighted_n_node_samples
     ]
@@ -68,6 +69,25 @@ cdef enum:
     NO_FEATURE = -1
     FEATURE_CONTINUOUS = 0
     FEATURE_DISCRETE   = 1
+
+cdef class FeatureParser:
+
+    def __cinit__(self):
+        pass
+
+    cpdef feature_parser(self, meta):
+        cdef SIZE_t n_features = meta.n_features_
+        cdef Feature* features = <Feature*>calloc(n_features,sizeof(Feature))
+
+        cdef SIZE_t i
+        for i in range(n_features):
+            features[i].type = FEATURE_DISCRETE
+            features[i].n_values = meta.features_[i].n_values
+
+        features[n_features-1].type = FEATURE_DISCRETE
+        features[n_features-1].n_values = meta.class_feature.n_values
+
+        return features
 
 # ====================================================================
 # Criterion
@@ -521,6 +541,10 @@ cdef class ExpSplitter(Splitter):
         
         best[0] = records[index]
 
+cdef Data set_data( np.ndarray X,
+                    np.ndarray y,
+                  )
+
 cdef class NBTreeBuilder:
 
     def __cinit__(self, 
@@ -551,7 +575,9 @@ cdef class NBTreeBuilder:
                 Data    data):
        
         #self.data = data
-        
+       
+        set_data(X, y, meta)
+
         cdef UINT32_t* rand = &self.rand_r_state
 
         cdef Splitter splitter = self.splitter
@@ -662,13 +688,13 @@ cdef class NBTreeBuilder:
                             )
 
                     # XXX
-                    tree.nodes[node_id].values = <DOUBLE_t*>calloc( data.n_outputs * data.max_n_classes, sizeof(DOUBLE_t))
+                    # tree.nodes[node_id].values = <DOUBLE_t*>calloc( data.n_outputs * data.max_n_classes, sizeof(DOUBLE_t))
 
                     # store class distribution into node.values
-                    splitter.node_value(tree.nodes[node_id].values)
+                    splitter.node_value(tree.value+node_id*tree.value_stride)
                     
                     # add noise to the class distribution
-                    noise_distribution(epsilon_per_action, tree.nodes[node_id].values, data, rand)
+                    noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
                 else:       
                     # inner node
                     # choose split feature
@@ -723,25 +749,36 @@ cdef class NBTreeBuilder:
             # TODO: prune
 
 cdef class Tree:
+    ''' Array based no-binary decision tree'''
+    property n_classes:
+        def __get__(self):
+            # it's small; copy for memory safety
+            return sizet_ptr_to_ndarray(self.n_classes, self.n_outputs).copy()
 
-    ''' Array based no-binary decision tree
+    property feature:
+        def __get__(self):
+            return self._get_node_ndarray()['feature'][:self.node_count]
 
-    Attributes
-    ----------
-    n_features,
-    n_outputs,
-    n_classes
-    max_n_classes
+    property threshold:
+        def __get__(self):
+            return self._get_node_ndarray()['threshold'][:self.node_count]
 
-    node_count
+    property impurity:
+        def __get__(self):
+            return self._get_node_ndarray()['impurity'][:self.node_count]
 
-    capacity
+    property n_node_samples:
+        def __get__(self):
+            return self._get_node_ndarray()['n_node_samples'][:self.node_count]
 
-    max_depth
+    property weighted_n_node_samples:
+        def __get__(self):
+            return self._get_node_ndarray()['weighted_n_node_samples'][:self.node_count]
 
-    nodes : array of Node, shape[ capacity ]
-    
-    '''
+    property value:
+        def __get__(self):
+            return self._get_value_ndarray()[:self.node_count]
+
 
     def __cinit__(self,
                 Feature*       features,
@@ -749,26 +786,31 @@ cdef class Tree:
                 np.ndarray[SIZE_t, ndim=1]  n_classes,
                 SIZE_t         n_outputs):
 
-        self.features = features
+        self.features = features    # XXX useful?
+        
         self.n_features = n_features
         self.n_outputs  = n_outputs
         self.n_classes  = NULL
         safe_realloc(&self.n_classes, n_outputs)
 
         self.max_n_classes = np.max(n_classes)
-        
+        self.value_stride = n_outputs * self.max_n_classes
+
         cdef SIZE_t k
         for k in range(n_outputs):
             self.n_classes[k] = n_classes[k]
 
         self.node_count = 0
-        self.max_depth  = 0
         self.capacity   = 0
         self.nodes      = NULL
+        self.value      = NULL
+        
+        self.max_depth  = 0
     
     def __dealloc__(self):
         free(self.n_classes)
         free(self.nodes)
+        free(self.value)
 
     cdef void _resize(self, SIZE_t capacity):
         if self._resize_c(capacity) != 0:
@@ -794,7 +836,18 @@ cdef class Tree:
         if ptr == NULL:
             return -1
         self.nodes = <Node*> ptr
-        
+        ptr = realloc(self.value,
+                      capacity * self.value_stride * sizeof(double))
+        if ptr == NULL:
+            return -1
+        self.value = <double*> ptr
+
+        # value memory is initialised to 0 to enable classifier argmax
+        if capacity > self.capacity:
+            memset(<void*>(self.value + self.capacity * self.value_stride), 
+                    0,
+                   (capacity - self.capacity) * self.value_stride * sizeof(double))
+
         # if capacity smaller than node_count, adjust the counter
         if capacity < self.node_count:
             self.node_count = capacity
@@ -823,30 +876,28 @@ cdef class Tree:
                 return <SIZE_t>(-1)
 
         cdef Node* node = &self.nodes[node_id]
-        
+                
+        node.parent = parent
+        node.is_leaf = is_leaf
+
+        node.feature = feature
+        node.threshold = threshold
         # node.impurity = impurity
-        node.n_children = n_children 
-        # node.index_children = 0
         
+        node.n_children = n_children 
         if is_leaf and n_children == 0:
             node.children = NULL
         else:
             node.children = <SIZE_t*>calloc(n_children, sizeof(SIZE_t))
             if node.children == NULL: # XXX error
                 return <SIZE_t>(-1)
-        node.is_leaf = is_leaf
 
         if parent != _TREE_UNDEFINED:
             if self.nodes[parent].n_children <= index:
                 with gil:
-                   raise ValueError("index error")
+                    raise ValueError("child's index %d is greater than parent's n_classes %d"%(index, self.nodes[parent].n_children))
             self.nodes[parent].children[index]=node_id
         
-        node.parent = parent
-        
-        node.feature = feature
-        node.threshold = threshold
-
         node.n_node_samples = n_node_samples
         node.weighted_n_node_samples = weighted_n_node_samples
 
@@ -854,7 +905,6 @@ cdef class Tree:
         return node_id
 
     cpdef np.ndarray predict(self, np.ndarray[DTYPE_t, ndim=2] X):
-        
         """Predict target for X."""
         out = self._get_value_ndarray().take(self.apply(X), axis=0,
                                              mode='clip')
@@ -872,17 +922,9 @@ cdef class Tree:
         shape[0] = <np.npy_intp> self.node_count
         shape[1] = <np.npy_intp> self.n_outputs
         shape[2] = <np.npy_intp> self.max_n_classes
-#         ##################################3333         
-#         print("self.node_count")
-#         print(self.node_count)
-#         print("self.n_outputs")
-#         print(self.n_outputs)
-#         print("self.max_n_classes")
-#         print(self.max_n_classes)
         
-        cdef np.ndarray arr  #dimension is shape[0] x [1] x [2]
+        cdef np.ndarray arr  # shape is [0] x [1] x [2]
         arr = np.PyArray_SimpleNewFromData(3, shape, np.NPY_DOUBLE, self.value)
-        ###################3#add ref_count  ,so save referent data in the underlying memory
         Py_INCREF(self)  
         arr.base = <PyObject*> self
         return arr
@@ -900,26 +942,29 @@ cdef class Tree:
         strides[0] = sizeof(Node)
         cdef np.ndarray arr
         Py_INCREF(NODE_DTYPE)
-        arr = PyArray_NewFromDescr(np.ndarray, <np.dtype> NODE_DTYPE, 1, shape,
-                                   strides, <void*> self.nodes,
-                                   np.NPY_DEFAULT, None)
+        arr = PyArray_NewFromDescr( np.ndarray, 
+                                    <np.dtype> NODE_DTYPE, # XXX
+                                    1, shape,
+                                    strides, <void*> self.nodes,
+                                    np.NPY_DEFAULT, None)
         Py_INCREF(self)
         arr.base = <PyObject*> self
         return arr
 
     cpdef np.ndarray apply(self, np.ndarray[DTYPE_t, ndim=2] X):
-
+        
         cdef SIZE_t n_samples = X.shape[0]
         cdef Node* node = NULL
         cdef SIZE_t i = 0
 
         cdef np.ndarray[SIZE_t] node_ids = np.zeros((n_samples,), dtype=np.intp)
+        cdef SIZE_t* id_data = <SIZE_t*> node_ids.data
 
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
 
-                while node.is_leaf == False:
+                while not node.is_leaf:
                     if self.features[node.feature].type == FEATURE_CONTINUOUS:
                         if X[i, node.feature] < node.threshold:
                             node = &self.nodes[node.children[0]]
@@ -928,7 +973,7 @@ cdef class Tree:
                     else:
                         node = &self.nodes[node.children[ <SIZE_t>X[i, node.feature] ]]
 
-                node_ids.data[i] = <SIZE_t>( node - self.nodes )
+                id_data[i] = <SIZE_t>( node - self.nodes )
 
         return node_ids
 
@@ -963,6 +1008,15 @@ cdef realloc_ptr safe_realloc(realloc_ptr* p, size_t nelems) except *:
     p[0] = tmp
     return tmp  # for convenience
 
+cdef inline np.ndarray sizet_ptr_to_ndarray(SIZE_t* data, SIZE_t size):
+    """Encapsulate data into a 1D numpy array of intp's."""
+    cdef np.npy_intp shape[1]
+    shape[0] = <np.npy_intp> size
+    return np.PyArray_SimpleNewFromData(1, shape, np.NPY_INTP, data)
+
+# ==================================================================
+# Utils for diffprivacy
+# ==================================================================
 cdef DOUBLE_t laplace(DOUBLE_t b, UINT32_t* rand) nogil except -1:
     # No diffprivacy
     if b <= 0.0:
