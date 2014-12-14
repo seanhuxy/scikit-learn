@@ -1,44 +1,62 @@
 """
 THis module implement no binary tree classifier
 """
+from __future__ import division
+
 import numbers
 import numpy as np
+from abc import ABCMeta, abstractmethod
+from warnings import warn
 
-from ._nbtree import FeatureParser
+from ..base import BaseEstimator, ClassifierMixin, RegressorMixin
+from ..externals import six
+from ..externals.six.moves import xrange
+from ..feature_selection.from_model import _LearntSelectorMixin
+from ..utils.validation import check_arrays
+
+from ._nbtree import DataObject
+# from ._nbtree import FeatureParser
 from ._nbtree import Criterion
 from ._nbtree import Splitter
+from ._nbtree import LapSplitter
+from ._nbtree import ExpSplitter
 from ._nbtree import NBTreeBuilder
 from ._nbtree import Tree
 from . import _nbtree
 
-__all__ = ["NbTreeClassifier"]
+# __all__ = ["NBTreeClassifier"]
 
 # =================================================================
 # Types and constants
 # =================================================================
 
-DTYPE = _tree.DTYPE     # XXX
-DOUBLE = _tree.DOUBLE
+DTYPE  = _nbtree.DTYPE     # XXX
+DOUBLE = _nbtree.DOUBLE
 
-CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy }
-SPLITTERS = { "lap": _nbtree.LapSplitter,
-              "exp": _nbtree.ExpSplitter }
+NO_DIFF_PRIVACY_MECH  = 0
+LAP_DIFF_PRIVACY_MECH = 1
+EXP_DIFF_PRIVACY_MECH = 2
+
+
+CRITERIA_CLF = { "gini": Criterion, "entropy": Criterion } # XXX
+SPLITTERS = { LAP_DIFF_PRIVACY_MECH : LapSplitter,
+              EXP_DIFF_PRIVACY_MECH : ExpSplitter }
 
 # =================================================================
 # Tree
 # =================================================================
-class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
+class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                                           _LearntSelectorMixin)): # XXX 
 
     def __init__(self,
                 
-                diffprivacy_mech = 1,
+                diffprivacy_mech = LAP_DIFF_PRIVACY_MECH ,
                 budget = 1.0,
                 
                 criterion = "gini",
-                seed = None,
+                seed = 1,
 
-                max_depth = 10,
+                max_depth = 5,
                 max_candid_features = 10
                 ):
 
@@ -59,17 +77,19 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         # inner structure
         self._tree = None
 
-    def _set_data(self, X, y, meta, sample_weight):
+    def fit(self,
+            X, y,
+            meta,
+            sample_weight = None,
+            debug = True
+            ):
+       
+        # random_state
+        random_state = self.random_state
 
-        # XXX what it did ?
-        # X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
-
-        n_samples, n_features = X.shape
-      
-        weighted_n_samples = 0.0
         if sample_weight is not None:
             if (getattr(sample_weight, "dtype", None) != DOUBLE or
-                    not sample_weight.flags.contiguous):
+                        not sample_weight.flags.contiguous):
                 sample_weight = np.ascontiguousarray(
                     sample_weight, dtype=DOUBLE)
             if len(sample_weight.shape) > 1:
@@ -80,82 +100,12 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                 raise ValueError("Number of weights=%d does not match "
                                  "number of samples=%d" %
                                  (len(sample_weight), n_samples))
-            
-            for i in range(n_samples):
-                weighted_n_samples += sample_weight[i]
-
-        # y
-        y = np.atleast_1d(y)
-        if y.ndim == 1:
-            y = np.reshape(y, (-1,1))
        
-        # class
-        n_outputs = y.shape[1]
-
-        y = np.copy(y) # XXX why copy?
-        classes = []
-        n_classes = []
-        max_n_classes = 0
-        for k in range( n_outputs ):
-            classes_k, y[:,k] = np.unique(y[:,k], return_inverse=True)
-            classes.append(classes_k)
-            n_classes.append(classes_k.shape[0])
-
-            if classes_k.shape[0] > max_n_classes:
-                max_n_classes = classes_k.shape[0]
-
-        n_classes = np.array( n_classes, dtype=np.intp)
-
-        if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
-            y = np.ascontiguousarray(y, dtype=DOUBLE)
+        X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
         
-        # set data
-        data = Data() 
-        data.X = X
-        data.y = y
-        data.sample_weight = sample_weight
-
-        data.X_sample_stride = X.data.strides[0]/X.data.itemsize
-        data.X_feature_stride = X.data.strides[1]/X.data.itemsize
-        data.y_stride = y.data.strides[0] /y.data.itemsize
-        
-        data.n_samples = n_samples
-        data.weighted_n_samples = weighted_n_samples
-
-        data.n_features = n_features
-        FeatureParser fp = FeatureParser
-        data.features = fp.feature_parser(meta) # XXX array of Feature
-
-        max_n_feature_values = 0
-        n_continuous_features = 0
-        for i in range(n_features):
-            if features[i].n_values > max_n_feature_values:
-                max_n_feature_values = features[i].n_values
-            if features[i].type == FEATURE_CONTINUOUS:
-                n_continuous_features += 1
-        data.max_n_feature_values = max_n_feature_values
-        data.n_continuous_features = n_continuous_features
-
-        # classes
-        data.n_outputs = n_outputs
-        data.classes   = classes
-        data.n_classes = n_classes
-        data.max_n_classes = max_n_classes
-    
-        return data
-
-    def fit(self,
-            X, y,
-            meta,
-            sample_weight = None,
-            ):
-       
-        # random_state
-        random_state = self.random_state
-
-        # 1. set data
-        data = self._set_data(X, y, meta, sample_weight)
-        self.data = data
+        # 1. init Data
+        print "Init DataObject"
+        dataobject = DataObject(X, y, meta, sample_weight)
 
         # 2. check parameter
         # XXX max depth
@@ -164,15 +114,16 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
             raise ValueError("max_depth must be greater than zero.")
         
         # 3. setup budget, diffprivacy
-        diffprivacy = self.diffprivacy
+        diffprivacy_mech = self.diffprivacy_mech
         budget = self.budget
-       
-        criterion = CRITERIA_CLF[self.criterion](data, random_state)
+        max_candid_features = self.max_candid_features 
 
-        splitter = SPLITTERS[ diffprivacy ]
-                (criterion, max_candid_features, random_state)  
+        print "Init Criterion, Splitter, Tree"
+        criterion = CRITERIA_CLF[self.criterion](dataobject, random_state)
 
-        tree = Tree(data.features, data.n_features, data.n_classes, data.n_outputs)
+        splitter = SPLITTERS[ diffprivacy_mech ](criterion, max_candid_features, random_state)  
+
+        tree = Tree(dataobject)
         self._tree = tree
 
         builder = NBTreeBuilder(diffprivacy_mech,
@@ -183,8 +134,10 @@ class NbTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                               random_state)
 
         # 4. build tree
-        builder.build( tree, data )
-        
+        print "Start to build Tree"
+        builder.build( tree, dataobject, debug)
+       
+        print "Finished building tree"
         if self.n_outputs_ == 1:
             self.n_classes_ = self.n_classes_[0]
             self.classes_ = self.classes_[0]

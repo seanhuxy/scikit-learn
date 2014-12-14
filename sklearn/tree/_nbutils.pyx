@@ -17,9 +17,9 @@ cdef class Stack:
     cdef bint is_empty(self) nogil:
         return self.top <= 0
 
-    cdef int _resize(self):
-        StackRecord* stack = NULL
-        SIZE_t capacity = self.capacity * 2
+    cdef int _resize(self) nogil:
+        cdef StackRecord* stack = NULL
+        cdef SIZE_t capacity = self.capacity * 2
 
         stack = <StackRecord*> realloc(
                 self.stack_, self.capacity * sizeof(StackRecord))
@@ -33,7 +33,7 @@ cdef class Stack:
 
 
     cdef int push(self, SIZE_t start, SIZE_t end, SIZE_t depth, 
-                SIZE_t node_id, SIZE_t index, SIZE_t n_node_features) nogil:
+                SIZE_t parent, SIZE_t index, SIZE_t n_node_features) nogil:
         cdef StackRecord* stack = NULL
         cdef SIZE_t top = self.top
 

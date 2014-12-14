@@ -23,6 +23,8 @@ inplace:
 	rm -f sklearn/utils/random*.so
 	$(PYTHON) setup.py build_ext -i
 
+tree-in: cython-tree in
+
 test-code: in
 	$(NOSETESTS) -s -v sklearn
 test-sphinxext:

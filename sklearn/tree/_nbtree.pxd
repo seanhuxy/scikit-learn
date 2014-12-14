@@ -23,30 +23,54 @@ cdef struct Feature:
     DOUBLE_t max     # for continuous feature only
     DOUBLE_t min     # for continuous feature only
 
-# finished,  TODO:
-#   check type 
-cdef struct Data:
 
-    DOUBLE_t* X
+cdef struct Data:
+    DTYPE_t* X
     DOUBLE_t* y
     DOUBLE_t* sample_weight
     
     SIZE_t  X_sample_stride  
     SIZE_t  X_feature_stride 
     SIZE_t  y_stride 
-
+    
     SIZE_t  n_samples 
-    SIZE_t  weighted_n_samples 
-
+    DOUBLE_t  weighted_n_samples 
+    
     Feature* features
     SIZE_t  n_features
     SIZE_t  max_n_feature_values # max(number of distint values of all feature)
     SIZE_t  n_continuous_features
-
+    
     SIZE_t  n_outputs
-    SIZE_t* classes
+    # cdef      SIZE_t* classes
     SIZE_t* n_classes
     SIZE_t  max_n_classes    # max(number of distinct class label)
+
+# wrapper class for Data
+cdef class DataObject:
+
+    cdef Data data
+    #cdef DOUBLE_t* X
+    #cdef DOUBLE_t* y
+    #cdef DOUBLE_t* sample_weight
+    #
+    #cdef SIZE_t  X_sample_stride  
+    #cdef SIZE_t  X_feature_stride 
+    #cdef SIZE_t  y_stride 
+    #
+    #cdef SIZE_t  n_samples 
+    #cdef DOUBLE_t  weighted_n_samples 
+    #
+    #cdef Feature* features
+    #cdef SIZE_t  n_features
+    #cdef SIZE_t  max_n_feature_values # max(number of distint values of all feature)
+    #cdef SIZE_t  n_continuous_features
+    #
+    #cdef SIZE_t  n_outputs
+    ## cdef      SIZE_t* classes
+    #cdef SIZE_t* n_classes
+    #cdef SIZE_t  max_n_classes    # max(number of distinct class label)
+
 # =======================================================================
 # Criterion
 # =======================================================================
@@ -81,7 +105,7 @@ cdef class Criterion:
     cdef void update(self, 
                      SIZE_t* samples_win,
                      SplitRecord split_record,
-                     DOUBLE_t* Xf) nogil
+                     DTYPE_t* Xf) nogil
     cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) nogil
     cdef void node_value(self, DOUBLE_t* dest) nogil
 
@@ -102,6 +126,8 @@ cdef struct SplitRecord:
 
 cdef class Splitter:
 
+    cdef int debug
+
     cdef public Criterion criterion
     cdef Data data
 
@@ -111,7 +137,7 @@ cdef class Splitter:
     cdef SIZE_t* features_win
     cdef SIZE_t  n_features
     
-    cdef DOUBLE_t* feature_values        # .temp
+    cdef DTYPE_t* feature_values        # .temp
 
     cdef SIZE_t max_candid_features      # reserved
 
@@ -156,7 +182,8 @@ cdef class NBTreeBuilder:
     cdef object random_state             # Random state
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
 
-    cpdef build(self, Tree tree, Data data) 
+    # cpdef build(self)
+    cpdef build(self, Tree tree, DataObject dataobject, int debug)
 
 # ==================================================================
 # Tree structure

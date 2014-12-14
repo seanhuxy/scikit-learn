@@ -12,6 +12,9 @@ import numpy as np
 cimport numpy as np
 np.import_array() # XXX
 
+from numpy import float32 as DTYPE
+from numpy import float64 as DOUBLE
+
 cdef extern from "numpy/arrayobject.h":
     object PyArray_NewFromDescr(object subtype, np.dtype descr,
                                 int nd, np.npy_intp* dims,
@@ -57,37 +60,16 @@ NODE_DTYPE = np.dtype({
 })
 
 
-cdef enum:
-    NO_DIFF_PRIVACY_MECH  = 0
-    LAP_DIFF_PRIVACY_MECH = 1
-    EXP_DIFF_RPIVACY_MECH = 2
+cpdef public SIZE_t NO_DIFF_PRIVACY_MECH  = 0
+cpdef public SIZE_t LAP_DIFF_PRIVACY_MECH = 1
+cpdef public SIZE_t EXP_DIFF_RPIVACY_MECH = 2
 
-    NO_DIFF_PRIVACY_BUDGET = -1
+cpdef public SIZE_t NO_DIFF_PRIVACY_BUDGET = -1
 
-    NO_THRESHOLD = -1
-
-    NO_FEATURE = -1
-    FEATURE_CONTINUOUS = 0
-    FEATURE_DISCRETE   = 1
-
-cdef class FeatureParser:
-
-    def __cinit__(self):
-        pass
-
-    cpdef feature_parser(self, meta):
-        cdef SIZE_t n_features = meta.n_features_
-        cdef Feature* features = <Feature*>calloc(n_features,sizeof(Feature))
-
-        cdef SIZE_t i
-        for i in range(n_features):
-            features[i].type = FEATURE_DISCRETE
-            features[i].n_values = meta.features_[i].n_values
-
-        features[n_features-1].type = FEATURE_DISCRETE
-        features[n_features-1].n_values = meta.class_feature.n_values
-
-        return features
+cpdef SIZE_t NO_THRESHOLD = -1
+cpdef SIZE_t NO_FEATURE = -1
+cpdef SIZE_t FEATURE_CONTINUOUS = 0
+cpdef SIZE_t FEATURE_DISCRETE   = 1
 
 # ====================================================================
 # Criterion
@@ -95,7 +77,7 @@ cdef class FeatureParser:
 
 cdef class Criterion:
 
-    def __cinit__(self, Data data, object random_state):
+    def __cinit__(self, DataObject dataobject, object random_state):
         '''
             allocate:
                 label_count,
@@ -108,7 +90,7 @@ cdef class Criterion:
         self.random_state = random_state 
         self.rand_r_state = random_state.randint(0, RAND_R_MAX)
        
-        self.data = data
+        cdef Data data = dataobject.data
 
         # self.samples_win = NULL
 
@@ -127,6 +109,8 @@ cdef class Criterion:
             raise MemoryError()
 
         self.sensitivity = 2.0   # gini
+    
+        self.data = data
 
     cdef void init(self, 
                    Data      data,
@@ -191,7 +175,7 @@ cdef class Criterion:
     cdef void update(self,
             SIZE_t* samples_win,
             SplitRecord split_record, 
-            DOUBLE_t* Xf  
+            DTYPE_t* Xf  
             ) nogil:       
         '''
         udpate:
@@ -199,7 +183,7 @@ cdef class Criterion:
         '''
         cdef Feature* feature = &self.data.features[split_record.feature_index]
        
-        cdef Data data = self.data
+        cdef Data data = self.data  # XXX
         cdef SIZE_t start = self.start
         cdef SIZE_t end   = self.end
 
@@ -310,6 +294,7 @@ cdef inline void _init_split(SplitRecord* self) nogil:
 
 cdef class Splitter:
 
+
     def __cinit__(self,
                     Criterion criterion,
                     SIZE_t max_candid_features,
@@ -329,6 +314,8 @@ cdef class Splitter:
 
         self.feature_values  = NULL # tempory array
         self.max_candid_features = max_candid_features
+   
+        self.debug = True
     
     def __dealloc__(self):
         free(self.samples_win)
@@ -354,7 +341,7 @@ cdef class Splitter:
         for i in range(n_features):
             features_win[i] = i
 
-        safe_realloc(&self.feature_values, n_samples) # XXX why error
+        safe_realloc(&self.feature_values, n_samples) 
 
         # set data
         self.data = data
@@ -412,7 +399,7 @@ cdef class Splitter:
         cdef SIZE_t f_i = n_node_features[0]-1
         cdef SIZE_t f_j = 0
 
-        cdef DOUBLE_t* Xf = self.feature_values
+        cdef DTYPE_t* Xf = self.feature_values
         cdef SIZE_t start = self.start,
         cdef SIZE_t end   = self.end
         cdef DOUBLE_t w   = 0.0
@@ -434,7 +421,7 @@ cdef class Splitter:
             
             # TODO use _tree.py sort() 
             # XXX type conversion
-            sort(<DTYPE_t*>(Xf+start), samples_win+start, end-start)
+            sort( Xf+start, samples_win+start, end-start)
     
 
             # if constant feature
@@ -453,17 +440,19 @@ cdef class Splitter:
                     
                     # TODO set threshold, 
                     self._choose_split_point(&current)
-                
                     # set  n_subnodes_samples
                     # set wn_subnodes_samples
                     
                 else:
                     current.n_subnodes = feature.n_values
                     
-                    # XXX error?
                     n_subnodes_samples  = safe_realloc(&current.n_subnodes_samples,  current.n_subnodes)
                     wn_subnodes_samples = safe_realloc(&current.wn_subnodes_samples, current.n_subnodes)
                     
+                    memset(n_subnodes_samples, 0, sizeof(SIZE_t)*current.n_subnodes)
+                    memset(wn_subnodes_samples,0, sizeof(DOUBLE_t)*current.n_subnodes)
+
+
                     for i in range(start,end):
                         if data.sample_weight == NULL:
                             w = 1.0
@@ -473,7 +462,11 @@ cdef class Splitter:
                         # XXX type convert
                         n_subnodes_samples [ <SIZE_t>Xf[i] ] += 1 
                         wn_subnodes_samples[ <SIZE_t>Xf[i] ] += w
-
+                    if self.debug:
+                        printf("distribution:\n")
+                        for i in range(current.n_subnodes):
+                            printf("%u ",n_subnodes_samples[i])
+                        printf("\n")
                  
                 self.criterion.update(samples_win, current, Xf)
                 current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_subnodes, epsilon)
@@ -541,9 +534,90 @@ cdef class ExpSplitter(Splitter):
         
         best[0] = records[index]
 
-cdef Data set_data( np.ndarray X,
-                    np.ndarray y,
-                  )
+cdef class DataObject:
+    
+    def __cinit__(self, 
+                    np.ndarray[DTYPE_t, ndim=2] X,
+                    np.ndarray[DOUBLE_t, ndim=2, mode="c"] y, 
+                    meta, np.ndarray sample_weight):
+        
+        cdef SIZE_t i
+        cdef SIZE_t k
+        
+        cdef SIZE_t n_samples
+        cdef SIZE_t n_features
+        n_samples = X.shape[0]
+        n_features = X.shape[1]
+        
+        cdef DOUBLE_t weighted_n_samples = 0.0
+        if sample_weight is not None:
+            for i in range(n_samples):
+                weighted_n_samples += sample_weight[i]
+        # y
+        y = np.atleast_1d(y)
+        if y.ndim == 1:
+            y = np.reshape(y, (-1,1))
+       
+        # class
+        cdef SIZE_t n_outputs = y.shape[1]
+        y = np.copy(y) # XXX why copy?
+        # cdef SIZE_t* classes = []
+        cdef SIZE_t* n_classes = <SIZE_t*>calloc(n_outputs, sizeof(SIZE_t))
+        cdef SIZE_t max_n_classes = 0
+        for k in range( n_outputs ):
+            classes_k, y[:,k] = np.unique(y[:,k], return_inverse=True)
+            # classes.append(classes_k)
+            n_classes[k] = classes_k.shape[0]
+            if classes_k.shape[0] > max_n_classes:
+                max_n_classes = classes_k.shape[0]
+        # n_classes = np.array( n_classes, dtype=np.intp)
+
+        if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
+            y = np.ascontiguousarray(y, dtype=DOUBLE)
+        
+        # features 
+        cdef Feature* features = <Feature*>calloc(n_features,sizeof(Feature))
+        for i in range(n_features):
+            features[i].type = FEATURE_DISCRETE
+            features[i].n_values = meta.features_[i].n_values
+        
+        cdef SIZE_t max_n_feature_values = 0
+        cdef SIZE_t n_continuous_features = 0
+        for i in range(n_features):
+            if features[i].n_values > max_n_feature_values:
+                max_n_feature_values = features[i].n_values
+            if features[i].type == FEATURE_CONTINUOUS:
+                n_continuous_features += 1
+
+        # set data
+        cdef Data data 
+
+        data.X = <DTYPE_t*> X.data
+        data.y = <DOUBLE_t*> y.data
+        if sample_weight is None:
+            data.sample_weight = NULL
+        else:
+            data.sample_weight = <DOUBLE_t*> sample_weight.data
+
+        data.X_sample_stride  = <SIZE_t> X.strides[0]/<SIZE_t> X.itemsize
+        data.X_feature_stride = <SIZE_t> X.strides[1]/<SIZE_t> X.itemsize
+        data.y_stride = <SIZE_t> y.strides[0] /<SIZE_t> y.itemsize
+        
+        data.n_samples = n_samples
+        data.weighted_n_samples = weighted_n_samples
+
+        data.n_features = n_features
+        data.features = features
+        data.max_n_feature_values = max_n_feature_values
+        data.n_continuous_features = n_continuous_features
+
+        # classes
+        data.n_outputs = n_outputs
+        # data.classes   = classes
+        data.n_classes = n_classes
+        data.max_n_classes = max_n_classes
+
+        self.data = data
 
 cdef class NBTreeBuilder:
 
@@ -569,33 +643,37 @@ cdef class NBTreeBuilder:
         
         self.random_state = random_state
         self.rand_r_state = random_state.randint(0, RAND_R_MAX)
+        
 
+    # cpdef build(self):
     cpdef build(self,
                 Tree    tree,
-                Data    data):
+                DataObject dataobject,
+                int     debug):
        
-        #self.data = data
-       
-        set_data(X, y, meta)
+        printf("Get into build function\n")
 
+        cdef Data data = dataobject.data
         cdef UINT32_t* rand = &self.rand_r_state
-
         cdef Splitter splitter = self.splitter
-
        
         # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
         cdef SIZE_t max_candid_features = self.max_candid_features
 
+        printf("Init capacity of tree\n")
+
         # Initial capacity of tree
-        cdef int init_capacity
+        cdef SIZE_t init_capacity
         if max_depth <= 10:
             init_capacity = (2 ** (max_depth + 1)) - 1
         else:
             init_capacity = 2047
+        printf("Tree init_capacity: %d \n", init_capacity) 
         tree._resize(init_capacity)
         self.tree = tree
- 
+
+        printf("Start to set diffprivacy parameter\n")
         # set parameter for diffprivacy
         cdef DOUBLE_t budget = self.budget
         cdef SIZE_t diffprivacy_mech = self.diffprivacy_mech
@@ -609,7 +687,7 @@ cdef class NBTreeBuilder:
         else:
             epsilon_per_action = NO_DIFF_PRIVACY_BUDGET
         
-        printf("espilon per action is %d", epsilon_per_action)
+        printf("espilon per action is %f\n", epsilon_per_action)
 
         # ===================================================
         # recursively depth first build tree 
@@ -651,8 +729,13 @@ cdef class NBTreeBuilder:
 
         if rc == -1:
             raise MemoryError()
+
+        cdef SIZE_t n_loop = 0
         with nogil:
             while not stack.is_empty():
+
+                printf("loop %d begin\n", n_loop)
+                n_loop += 1
 
                 stack.pop(&stack_record)
                 start = stack_record.start
@@ -668,13 +751,15 @@ cdef class NBTreeBuilder:
                 # node_reset
                 #       fill label_total_count,
                 #       calculate weighted_n_node_samples
+                printf("node_reset: from %u to %u\n", start, end)
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
                 # if leaf
                 if (  depth >= max_depth 
                    or n_node_features <= 0 
-                   or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action ) : # XXX
-                    
+                   or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action ) : # xxx
+                    if debug:
+                        printf("becomes a leaf node\n")
                     # leaf node
                     node_id = tree._add_node(
                             parent,
@@ -684,7 +769,7 @@ cdef class NBTreeBuilder:
                             NO_THRESHOLD,
                             0,                      # no children
                             n_node_samples,
-                            weighted_n_node_samples # XXX
+                            weighted_n_node_samples # xxx
                             )
 
                     # XXX
@@ -696,9 +781,12 @@ cdef class NBTreeBuilder:
                     # add noise to the class distribution
                     noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
                 else:       
+                    if debug:
+                        printf("becomes a inner node\n")
                     # inner node
                     # choose split feature
                     # XXX: refine node_split
+
                     with gil:
                         splitter.node_split( &split_record, &n_node_features, epsilon_per_action )
                 
@@ -712,6 +800,11 @@ cdef class NBTreeBuilder:
                             n_node_samples, 
                             weighted_n_node_samples # XXX
                             )
+
+                    if debug:
+                        printf("New inner Node\n parent\t%u,\n index\t%u,\n feature\t%u,\n n_children\t%u,\n n_node_samples\t%u,\n weighted_node_samples\t%f\n\n",
+                                parent, index, split_record.feature_index, split_record.n_subnodes,
+                                n_node_samples, weighted_n_node_samples)
 
                     # push children into stack
                     # split_feature = data.features[split_record.feature_index]   
@@ -730,7 +823,10 @@ cdef class NBTreeBuilder:
                             index,      # the index
                             n_node_features 
                             )
-                    
+                        if debug:
+                            printf("Push new into stack\n start\t%u,\n end\t%u,\n depth\t%u,\n parent\t%u,\n index\t%u,\n n_node_features\t%u\n\n",
+                                start_i,end_i,depth+1,node_id,index,n_node_features)
+
                         if rc == -1:
                             break
                             # raise MemoryError()
@@ -748,6 +844,8 @@ cdef class NBTreeBuilder:
             raise MemoryError()
             # TODO: prune
 
+        printf("Finished building the tree\n")        
+ 
 cdef class Tree:
     ''' Array based no-binary decision tree'''
     property n_classes:
@@ -781,23 +879,27 @@ cdef class Tree:
 
 
     def __cinit__(self,
-                Feature*       features,
-                SIZE_t         n_features,
-                np.ndarray[SIZE_t, ndim=1]  n_classes,
-                SIZE_t         n_outputs):
+            DataObject dataobject):
+                #Feature*       features,
+                #SIZE_t         n_features,
+                #np.ndarray[SIZE_t, ndim=1]  n_classes,
+                #SIZE_t         n_outputs):
 
-        self.features = features    # XXX useful?
+        cdef Data data = dataobject.data
+        cdef SIZE_t* n_classes = data.n_classes
+
+        self.features = data.features    # XXX useful?
         
-        self.n_features = n_features
-        self.n_outputs  = n_outputs
+        self.n_features = data.n_features
+        self.n_outputs  = data.n_outputs
         self.n_classes  = NULL
-        safe_realloc(&self.n_classes, n_outputs)
+        safe_realloc(&self.n_classes, self.n_outputs)
 
-        self.max_n_classes = np.max(n_classes)
-        self.value_stride = n_outputs * self.max_n_classes
+        self.max_n_classes = data.max_n_classes
+        self.value_stride = self.n_outputs * self.max_n_classes
 
         cdef SIZE_t k
-        for k in range(n_outputs):
+        for k in range(self.n_outputs):
             self.n_classes[k] = n_classes[k]
 
         self.node_count = 0
@@ -820,7 +922,8 @@ cdef class Tree:
         capacity by default = -1, means double the capacity of the inner struct
     '''
     cdef int _resize_c(self, SIZE_t capacity=<SIZE_t>(-1)) nogil:
-        
+       
+        printf("Get in resize c\n")
         if capacity == self.capacity and self.nodes != NULL:
             return 0
 
@@ -829,6 +932,8 @@ cdef class Tree:
                 capacity = 3  # default initial value
             else:
                 capacity = 2 * self.capacity
+        printf("XXX \n") 
+ 
 
         # XXX no safe_realloc here because we need to grab the GIL
         # realloc self.nodes
@@ -836,23 +941,33 @@ cdef class Tree:
         if ptr == NULL:
             return -1
         self.nodes = <Node*> ptr
+        
+        printf("XXX \n") 
         ptr = realloc(self.value,
                       capacity * self.value_stride * sizeof(double))
         if ptr == NULL:
             return -1
         self.value = <double*> ptr
-
+        
+        printf("XXX \n") 
+ 
         # value memory is initialised to 0 to enable classifier argmax
         if capacity > self.capacity:
             memset(<void*>(self.value + self.capacity * self.value_stride), 
                     0,
                    (capacity - self.capacity) * self.value_stride * sizeof(double))
-
+        
+        printf("XXX \n") 
+ 
         # if capacity smaller than node_count, adjust the counter
         if capacity < self.node_count:
             self.node_count = capacity
-
+        printf("XXX \n") 
+ 
         self.capacity = capacity
+        printf("XXX \n") 
+        printf("XXX get out of resize c \n") 
+
         return 0
 
     cdef SIZE_t _add_node(self, 
