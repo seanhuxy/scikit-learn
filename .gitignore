@@ -1,4 +1,4 @@
-*.c
+sklearn/**/*.c
 *.h
 *.pyc
 *.so

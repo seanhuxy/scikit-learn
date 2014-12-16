@@ -195,6 +195,8 @@ cdef class Criterion:
         cdef SIZE_t p, s_i, f_i, k, 
         cdef DOUBLE_t w
 
+        memset(label_count, 0, feature.n_values*feature_stride*sizeof(DOUBLE_t))
+        
         #feature_value = 0  # feature value, from 0 to feature.n_values-1   
         for p in range(start, end):
             s_i = samples_win[p]
@@ -220,6 +222,16 @@ cdef class Criterion:
                 label_index = f_i*feature_stride + k*label_count_stride + class_label
                 label_count[label_index] += w
 
+        cdef SIZE_t debug = 1
+        if debug:
+            label_count = self.label_count
+            for f_i in range(feature.n_values):
+                printf("Fvalue[%u]:", f_i)
+                for k in range(data.n_outputs):
+                    for s_i in range(data.max_n_classes):
+                        printf("%f,", label_count[f_i*feature_stride + k*label_count_stride + s_i])
+                printf("\n")         
+
     # gini
     cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) nogil:
 
@@ -234,18 +246,31 @@ cdef class Criterion:
         cdef SIZE_t* n_classes = self.data.n_classes 
         cdef SIZE_t label_count_stride = self.label_count_stride
 
+        cdef SIZE_t debug = 0
+        if debug:
+            printf("label_count:\n")
+            for k in range(n_outputs):
+                for c in range(n_classes[k]):
+                    printf("%f, ", label_count[k*label_count_stride + c])
+            printf("\n")
+
         total = 0.0
         for k in range(n_outputs):
             gini = 0.0
 
             for c in range(n_classes[k]):
                 count = label_count[c] + noise(epsilon, rand) # XXX
-                gini += (count*count) / wn_samples 
-            
+                if wn_samples > 0.0:
+                    gini += (count*count) / wn_samples 
+                if debug:    
+                    printf("count[%f], wn_samples[%f], gini[%f]\n", count, wn_samples, gini)
+
             total += gini
             label_count += label_count_stride 
-
-        return total / n_outputs 
+        
+        if debug:
+            printf("total[%f]\n", total/<DOUBLE_t>n_outputs)
+        return total / <DOUBLE_t>n_outputs 
 
 
     cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, DOUBLE_t epsilon) nogil:
@@ -253,15 +278,24 @@ cdef class Criterion:
         calculate improvement based on class distribution
         '''
         cdef DOUBLE_t* label_count = self.label_count
-       
-        cdef DOUBLE_t improvement = 0
+        cdef DOUBLE_t improvement = 0.0
 
         cdef SIZE_t i = 0
+        cdef SIZE_t debug = 0
+        
+        if debug:
+            printf("improvement:\n")
+
         # sum up node_impurity of each subset 
         for i in range(n_subnodes):
-            label_count += self.feature_stride 
+            
             improvement += self.node_impurity(label_count, wn_subnodes_samples[i], epsilon) # XXX
-
+            if debug:
+                pass
+                # printf("%f,", improvement)
+            label_count += self.feature_stride 
+        if debug:
+            printf("\n")
         return improvement
 
     cdef void node_value(self, DOUBLE_t* dest) nogil:
@@ -407,6 +441,10 @@ cdef class Splitter:
         cdef SIZE_t* n_subnodes_samples
         cdef DOUBLE_t* wn_subnodes_samples
 
+        if self.debug:
+            printf("selecting split feature from %u candid for node from %u to %u\n\n",
+                    n_node_features[0],start,end)
+
         while f_j <= f_i :
             _init_split(&current)
             current.feature_index = features_win[f_j]
@@ -426,11 +464,15 @@ cdef class Splitter:
 
             # if constant feature
             if Xf[end-1] <= Xf[start] + FEATURE_THRESHOLD:
+                if self.debug:
+                    printf("feature[%u] X[%u]=%d is very close to X[%u]=%d, ignore this feature\n\n",
+                            features_win[f_j], start, Xf[start], end-1, Xf[end-1])
                 features_win[f_j] = features_win[f_i]
                 features_win[f_i] = current.feature_index 
                 f_i -= 1
                 # goes to next candidate feature
-            
+                
+
             # not constant feature
             else:                
                 # if continuous feature
@@ -463,14 +505,15 @@ cdef class Splitter:
                         n_subnodes_samples [ <SIZE_t>Xf[i] ] += 1 
                         wn_subnodes_samples[ <SIZE_t>Xf[i] ] += w
                     if self.debug:
-                        printf("distribution:\n")
+                        printf("distribution of feature[%u]:\n",current.feature_index)
                         for i in range(current.n_subnodes):
                             printf("%u ",n_subnodes_samples[i])
                         printf("\n")
                  
                 self.criterion.update(samples_win, current, Xf)
                 current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_subnodes, epsilon)
-
+                if self.debug:
+                    printf("score of feature[%u] is %f\n\n", current.feature_index,current.improvement)
                 feature_records[f_j] = current
                 if current.improvement > best.improvement:
                     best = current
@@ -479,11 +522,15 @@ cdef class Splitter:
 
         self._choose_split_feature(&best, 
                             feature_records, 
-                            f_i, 
+                            f_i+1,
                             epsilon)
 
+        # switch best to f_i
+        features_win[f_j] = features_win[f_i]
+        features_win[f_i] = best.feature_index
+
         split_record[0]    = best
-        n_node_features[0] = f_i+1 
+        n_node_features[0] = f_i
 
     cdef void node_value(self,DOUBLE_t* dest) nogil:
         self.criterion.node_value(dest)
@@ -619,6 +666,7 @@ cdef class DataObject:
 
         self.data = data
 
+
 cdef class NBTreeBuilder:
 
     def __cinit__(self, 
@@ -751,7 +799,6 @@ cdef class NBTreeBuilder:
                 # node_reset
                 #       fill label_total_count,
                 #       calculate weighted_n_node_samples
-                printf("node_reset: from %u to %u\n", start, end)
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
                 # if leaf
@@ -759,7 +806,10 @@ cdef class NBTreeBuilder:
                    or n_node_features <= 0 
                    or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action ) : # xxx
                     if debug:
-                        printf("becomes a leaf node\n")
+                        printf("===========================================================\n")
+                        printf(" Leaf Node, depth[%u], parent[%u], index[%u]\n sample from %u to %u\n",
+                                depth, parent, index, start, end)
+                        printf("===========================================================\n")
                     # leaf node
                     node_id = tree._add_node(
                             parent,
@@ -782,7 +832,11 @@ cdef class NBTreeBuilder:
                     noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
                 else:       
                     if debug:
-                        printf("becomes a inner node\n")
+                        printf("===========================================================\n")
+                        printf("Inner node: Depth[%u], parent[%u] index[%u]\n", depth, parent, index)
+                        printf(" samples from %u to %u\n", start, end)
+                        printf("===========================================================\n")
+                    
                     # inner node
                     # choose split feature
                     # XXX: refine node_split
@@ -802,9 +856,9 @@ cdef class NBTreeBuilder:
                             )
 
                     if debug:
-                        printf("New inner Node\n parent\t%u,\n index\t%u,\n feature\t%u,\n n_children\t%u,\n n_node_samples\t%u,\n weighted_node_samples\t%f\n\n",
-                                parent, index, split_record.feature_index, split_record.n_subnodes,
-                                n_node_samples, weighted_n_node_samples)
+                        printf("Selected feature[%u],\n\tn_children[%u], n_node_samples[%u]\n\n",
+                                split_record.feature_index, split_record.n_subnodes,
+                                n_node_samples,)
 
                     # push children into stack
                     # split_feature = data.features[split_record.feature_index]   
@@ -824,9 +878,9 @@ cdef class NBTreeBuilder:
                             n_node_features 
                             )
                         if debug:
-                            printf("Push new into stack\n start\t%u,\n end\t%u,\n depth\t%u,\n parent\t%u,\n index\t%u,\n n_node_features\t%u\n\n",
-                                start_i,end_i,depth+1,node_id,index,n_node_features)
-
+                            printf("\tChild[%u] from %u to %u, left %u features\n",
+                                index,start_i,end_i,n_node_features)
+                            printf("=============================================================\n")
                         if rc == -1:
                             break
                             # raise MemoryError()
@@ -1146,6 +1200,8 @@ cdef DOUBLE_t laplace(DOUBLE_t b, UINT32_t* rand) nogil except -1:
 cdef DOUBLE_t noise(DOUBLE_t epsilon, UINT32_t* rand) nogil:
     if epsilon == NO_DIFF_PRIVACY_BUDGET:
         return 0.0
+    
+    printf("XXX error, should not be shown")
 
     return laplace(1.0/epsilon, rand)
 

@@ -8,7 +8,7 @@ import numpy as np
 from abc import ABCMeta, abstractmethod
 from warnings import warn
 
-from ..base import BaseEstimator, ClassifierMixin, RegressorMixin
+from ..base import BaseEstimator, ClassifierMixin
 from ..externals import six
 from ..externals.six.moves import xrange
 from ..feature_selection.from_model import _LearntSelectorMixin
@@ -39,19 +39,20 @@ EXP_DIFF_PRIVACY_MECH = 2
 
 
 CRITERIA_CLF = { "gini": Criterion, "entropy": Criterion } # XXX
-SPLITTERS = { LAP_DIFF_PRIVACY_MECH : LapSplitter,
+SPLITTERS = { NO_DIFF_PRIVACY_MECH  : LapSplitter, 
+              LAP_DIFF_PRIVACY_MECH : LapSplitter,
               EXP_DIFF_PRIVACY_MECH : ExpSplitter }
 
 # =================================================================
 # Tree
 # =================================================================
-class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
+class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixin,
                                           _LearntSelectorMixin)): # XXX 
 
     def __init__(self,
                 
-                diffprivacy_mech = LAP_DIFF_PRIVACY_MECH ,
-                budget = 1.0,
+                diffprivacy_mech = NO_DIFF_PRIVACY_MECH ,
+                budget = -1.0,
                 
                 criterion = "gini",
                 seed = 1,
@@ -138,9 +139,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         builder.build( tree, dataobject, debug)
        
         print "Finished building tree"
-        if self.n_outputs_ == 1:
-            self.n_classes_ = self.n_classes_[0]
-            self.classes_ = self.classes_[0]
+#        if self.data.n_outputs == 1:
+#            self.data.n_classes = self.data.n_classes[0]
 
         return self
 
