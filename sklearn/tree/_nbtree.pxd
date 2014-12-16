@@ -62,13 +62,13 @@ cdef class DataObject:
     #cdef DOUBLE_t  weighted_n_samples 
     #
     #cdef Feature* features
-    #cdef SIZE_t  n_features
+    cdef public SIZE_t n_features
     #cdef SIZE_t  max_n_feature_values # max(number of distint values of all feature)
     #cdef SIZE_t  n_continuous_features
     #
-    #cdef SIZE_t  n_outputs
-    ## cdef      SIZE_t* classes
-    #cdef SIZE_t* n_classes
+    cdef public SIZE_t n_outputs
+    cdef public object classes
+    cdef public object n_classes
     #cdef SIZE_t  max_n_classes    # max(number of distinct class label)
 
 # =======================================================================

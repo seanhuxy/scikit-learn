@@ -17,12 +17,17 @@ data_dict = [dict(zip(data.dtype.names, record)) for record in data]
 vectorizer = Dict_Vectorizer()
 X, y, meta = vectorizer.fit_transform(data_dict, None)
 
-nbtree = NBTreeClassifier()
-nbtree = nbtree.fit(X,y,meta)
 
-output =  cross_val_score(nbtree, X, y, cv=10)
+if y.shape[1] == 1:
+    y = np.squeeze(y)
 
+nbtree = NBTreeClassifier(max_depth=4)
 
+# nbtree = nbtree.fit(X,y,meta)
+
+output =  cross_val_score(nbtree, X, y, cv=10, fit_params={'meta':meta, 'debug':False})
+
+print output
 print "test finished"
 
 

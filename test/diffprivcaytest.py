@@ -1,4 +1,4 @@
-
+import os
 import numpy as np
 from sklearn.datasets import load_iris
 #from sklearn.tree import DecisionTreeClassifier
@@ -7,7 +7,7 @@ from sklearn.tree import DiffPrivacyDecisionTreeClassifier
 
 from sklearn.datasets import load_svmlight_file
 
-filename = "../dataset/adulta3a.txt"
+filename = os.getenv("HOME")+"/diffprivacy/dataset/adulta3a.txt"
 
 X, y = load_svmlight_file(filename)
 X = X.toarray()
@@ -19,6 +19,7 @@ clf = DiffPrivacyDecisionTreeClassifier(random_state=2,
 										diffprivacy_mech=2, 
 										budget = budget,
 										max_depth = max_depth)
+print "print y:", y
 exp_output = cross_val_score(clf, X, y, cv=10)
 
 clf.diffprivacy_mech=1

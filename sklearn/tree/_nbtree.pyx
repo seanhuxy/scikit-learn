@@ -1,5 +1,5 @@
 from libc.stdio cimport printf
-from libc.stdlib cimport calloc, free, realloc
+from libc.stdlib cimport calloc, free, realloc, exit
 from libc.string cimport memcpy, memset
 from libc.math   cimport log, exp, sqrt
 from cpython cimport Py_INCREF, PyObject
@@ -222,7 +222,7 @@ cdef class Criterion:
                 label_index = f_i*feature_stride + k*label_count_stride + class_label
                 label_count[label_index] += w
 
-        cdef SIZE_t debug = 1
+        cdef SIZE_t debug = 0
         if debug:
             label_count = self.label_count
             for f_i in range(feature.n_values):
@@ -318,7 +318,7 @@ cdef class Criterion:
 # Splitter 
 # ===========================================================
 cdef inline void _init_split(SplitRecord* self) nogil:
-    self.feature_index = 0
+    self.feature_index = -1
     self.threshold = 0.0
     self.improvement = -INFINITY
 
@@ -349,7 +349,7 @@ cdef class Splitter:
         self.feature_values  = NULL # tempory array
         self.max_candid_features = max_candid_features
    
-        self.debug = True
+        self.debug = False
     
     def __dealloc__(self):
         free(self.samples_win)
@@ -424,6 +424,7 @@ cdef class Splitter:
         cdef SplitRecord current, best
         _init_split(&current)
         _init_split(&best)
+        cdef SIZE_t best_i = -1
 
         cdef Data data = self.data
         cdef SIZE_t* samples_win = self.samples_win
@@ -432,6 +433,7 @@ cdef class Splitter:
         cdef SIZE_t* features_win = self.features_win 
         cdef SIZE_t f_i = n_node_features[0]-1
         cdef SIZE_t f_j = 0
+        cdef SIZE_t tmp
 
         cdef DTYPE_t* Xf = self.feature_values
         cdef SIZE_t start = self.start,
@@ -445,17 +447,23 @@ cdef class Splitter:
             printf("selecting split feature from %u candid for node from %u to %u\n\n",
                     n_node_features[0],start,end)
 
+            printf("features window:\n")
+            for f_j in range(n_node_features[0]):
+                printf("%u, ",features_win[f_j])
+            printf("\n")
+        f_j = 0
+
         while f_j <= f_i :
             _init_split(&current)
             current.feature_index = features_win[f_j]
-            feature = &data.features[current.feature_index]
+            feature = &data.features[ features_win[f_j] ]
 
             # copy to Xf
             for p in range(start, end):
                 # Xf[p] = X[sample_index, feature_index]
                 Xf[p] = data.X [     
-                        samples_win[p]        * data.X_sample_stride  
-                     +  current.feature_index * data.X_feature_stride ]
+                        samples_win[p]    * data.X_sample_stride  
+                     +  features_win[f_j] * data.X_feature_stride ]
             
             # TODO use _tree.py sort() 
             # XXX type conversion
@@ -467,8 +475,9 @@ cdef class Splitter:
                 if self.debug:
                     printf("feature[%u] X[%u]=%d is very close to X[%u]=%d, ignore this feature\n\n",
                             features_win[f_j], start, Xf[start], end-1, Xf[end-1])
+                tmp               = features_win[f_j] 
                 features_win[f_j] = features_win[f_i]
-                features_win[f_i] = current.feature_index 
+                features_win[f_i] = tmp
                 f_i -= 1
                 # goes to next candidate feature
                 
@@ -477,7 +486,7 @@ cdef class Splitter:
             else:                
                 # if continuous feature
                 if feature.type == FEATURE_CONTINUOUS:
-                    raise ValueError("Warning, node_split not support continuous feature") 
+                    raise ValueError("Warning, node_split not support continuous feature[%u], type[%u]", features_win[f_j], feature.type) 
                     current.n_subnodes = 2
                     
                     # TODO set threshold, 
@@ -505,7 +514,7 @@ cdef class Splitter:
                         n_subnodes_samples [ <SIZE_t>Xf[i] ] += 1 
                         wn_subnodes_samples[ <SIZE_t>Xf[i] ] += w
                     if self.debug:
-                        printf("distribution of feature[%u]:\n",current.feature_index)
+                        printf("distribution of feature[%u]:\n",features_win[f_j])
                         for i in range(current.n_subnodes):
                             printf("%u ",n_subnodes_samples[i])
                         printf("\n")
@@ -514,20 +523,23 @@ cdef class Splitter:
                 current.improvement = self.criterion.improvement(current.wn_subnodes_samples, current.n_subnodes, epsilon)
                 if self.debug:
                     printf("score of feature[%u] is %f\n\n", current.feature_index,current.improvement)
+                
                 feature_records[f_j] = current
                 if current.improvement > best.improvement:
                     best = current
-
+                    best_i = f_j
                 f_j += 1
+#
+#       best_i = self._choose_split_feature(&best, # XXX
+#                            feature_records, 
+#                            f_i+1,
+#                            epsilon)
 
-        self._choose_split_feature(&best, 
-                            feature_records, 
-                            f_i+1,
-                            epsilon)
-
-        # switch best to f_i
-        features_win[f_j] = features_win[f_i]
-        features_win[f_i] = best.feature_index
+        if best.feature_index != -1:
+            # switch best to f_i
+            tmp                  = features_win[best_i]
+            features_win[best_i] = features_win[f_i]
+            features_win[f_i]    = tmp
 
         split_record[0]    = best
         n_node_features[0] = f_i
@@ -666,6 +678,14 @@ cdef class DataObject:
 
         self.data = data
 
+        self.n_features = self.data.n_features
+        self.n_outputs  = self.data.n_outputs
+        self.classes  = []
+        self.n_classes= []
+        for k in range(self.n_outputs):
+            classes_k, y[:, k] = np.unique(y[:, k], return_inverse=True)
+            self.classes.append(classes_k)
+            self.n_classes.append(classes_k.shape[0])
 
 cdef class NBTreeBuilder:
 
@@ -699,8 +719,6 @@ cdef class NBTreeBuilder:
                 DataObject dataobject,
                 int     debug):
        
-        printf("Get into build function\n")
-
         cdef Data data = dataobject.data
         cdef UINT32_t* rand = &self.rand_r_state
         cdef Splitter splitter = self.splitter
@@ -708,8 +726,8 @@ cdef class NBTreeBuilder:
         # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
         cdef SIZE_t max_candid_features = self.max_candid_features
-
-        printf("Init capacity of tree\n")
+        if debug:
+            printf("Init capacity of tree\n")
 
         # Initial capacity of tree
         cdef SIZE_t init_capacity
@@ -717,11 +735,11 @@ cdef class NBTreeBuilder:
             init_capacity = (2 ** (max_depth + 1)) - 1
         else:
             init_capacity = 2047
-        printf("Tree init_capacity: %d \n", init_capacity) 
+        if debug:
+            printf("Tree init_capacity: %d \n", init_capacity) 
         tree._resize(init_capacity)
         self.tree = tree
 
-        printf("Start to set diffprivacy parameter\n")
         # set parameter for diffprivacy
         cdef DOUBLE_t budget = self.budget
         cdef SIZE_t diffprivacy_mech = self.diffprivacy_mech
@@ -769,7 +787,7 @@ cdef class NBTreeBuilder:
 #        stack_record.n_node_features  = data.n_features
         # push root node into stack
         rc = stack.push(0,              # start
-                        data.n_samples, # end
+                        data.n_samples-1, # end
                         0,              # depth
                         _TREE_UNDEFINED,# parent
                         0,              # index
@@ -779,10 +797,11 @@ cdef class NBTreeBuilder:
             raise MemoryError()
 
         cdef SIZE_t n_loop = 0
+        cdef bint is_leaf = 0
         with nogil:
             while not stack.is_empty():
 
-                printf("loop %d begin\n", n_loop)
+                # printf("loop %d begin\n", n_loop)
                 n_loop += 1
 
                 stack.pop(&stack_record)
@@ -801,10 +820,22 @@ cdef class NBTreeBuilder:
                 #       calculate weighted_n_node_samples
                 splitter.node_reset(start, end, &weighted_n_node_samples)
 
-                # if leaf
-                if (  depth >= max_depth 
-                   or n_node_features <= 0 
-                   or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action ) : # xxx
+
+                is_leaf = (depth >= max_depth or n_node_features <= 0)
+                if epsilon_per_action > 0.0:
+                    noisy_n_node_samples = <DOUBLE_t>n_node_samples + noise(epsilon_per_action, rand) # XXX
+                    is_leaf = is_leaf or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action
+                else:
+                    is_leaf = is_leaf or ( n_node_samples <= 0 )
+
+                if not is_leaf:
+                    # choose split feature
+                    # XXX: refine node_split                    
+                    with gil:
+                        splitter.node_split( &split_record, &n_node_features, epsilon_per_action )
+                        is_leaf = (split_record.feature_index == -1)
+
+                if is_leaf:
                     if debug:
                         printf("===========================================================\n")
                         printf(" Leaf Node, depth[%u], parent[%u], index[%u]\n sample from %u to %u\n",
@@ -814,7 +845,7 @@ cdef class NBTreeBuilder:
                     node_id = tree._add_node(
                             parent,
                             index,
-                            True,      # leaf node
+                            1,      # leaf node
                             NO_FEATURE,
                             NO_THRESHOLD,
                             0,                      # no children
@@ -822,32 +853,24 @@ cdef class NBTreeBuilder:
                             weighted_n_node_samples # xxx
                             )
 
-                    # XXX
                     # tree.nodes[node_id].values = <DOUBLE_t*>calloc( data.n_outputs * data.max_n_classes, sizeof(DOUBLE_t))
-
                     # store class distribution into node.values
                     splitter.node_value(tree.value+node_id*tree.value_stride)
-                    
                     # add noise to the class distribution
                     noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
-                else:       
+
+                else:
+
                     if debug:
                         printf("===========================================================\n")
                         printf("Inner node: Depth[%u], parent[%u] index[%u]\n", depth, parent, index)
                         printf(" samples from %u to %u\n", start, end)
                         printf("===========================================================\n")
-                    
-                    # inner node
-                    # choose split feature
-                    # XXX: refine node_split
-
-                    with gil:
-                        splitter.node_split( &split_record, &n_node_features, epsilon_per_action )
-                
+ 
                     node_id = tree._add_node(
                             parent,
                             index,
-                            False,     # not leaf node
+                            0,     # not leaf node
                             split_record.feature_index,
                             split_record.threshold,
                             split_record.n_subnodes,  # number of children
@@ -862,10 +885,12 @@ cdef class NBTreeBuilder:
 
                     # push children into stack
                     # split_feature = data.features[split_record.feature_index]   
-
                     start_i = 0
                     end_i   = 0
                     for index in range(split_record.n_subnodes):
+                        if debug:
+                            printf("children[%u], n_subnode samples[%u]\n",index, split_record.n_subnodes_samples[index])
+                        
                         start_i = end_i
                         end_i   = end_i + split_record.n_subnodes_samples[index]
                         
@@ -880,8 +905,8 @@ cdef class NBTreeBuilder:
                         if debug:
                             printf("\tChild[%u] from %u to %u, left %u features\n",
                                 index,start_i,end_i,n_node_features)
-                            printf("=============================================================\n")
                         if rc == -1:
+                            printf(" Error: stack.push failed\n")
                             break
                             # raise MemoryError()
                             
@@ -898,8 +923,16 @@ cdef class NBTreeBuilder:
             raise MemoryError()
             # TODO: prune
 
-        printf("Finished building the tree\n")        
- 
+
+        if 0:
+            for i in range(tree.node_count):
+                printf("Node[%u], is_leaf[%u], n_children[%u]\n",i, tree.nodes[i].is_leaf, tree.nodes[i].n_children)
+                if not tree.nodes[i].is_leaf:
+                    printf("Child:")
+                    for k in range(tree.nodes[i].n_children):
+                        printf("%u, ", tree.nodes[i].children[k])
+                    printf("\n\n")
+
 cdef class Tree:
     ''' Array based no-binary decision tree'''
     property n_classes:
@@ -977,7 +1010,6 @@ cdef class Tree:
     '''
     cdef int _resize_c(self, SIZE_t capacity=<SIZE_t>(-1)) nogil:
        
-        printf("Get in resize c\n")
         if capacity == self.capacity and self.nodes != NULL:
             return 0
 
@@ -986,7 +1018,6 @@ cdef class Tree:
                 capacity = 3  # default initial value
             else:
                 capacity = 2 * self.capacity
-        printf("XXX \n") 
  
 
         # XXX no safe_realloc here because we need to grab the GIL
@@ -996,31 +1027,23 @@ cdef class Tree:
             return -1
         self.nodes = <Node*> ptr
         
-        printf("XXX \n") 
         ptr = realloc(self.value,
                       capacity * self.value_stride * sizeof(double))
         if ptr == NULL:
             return -1
         self.value = <double*> ptr
         
-        printf("XXX \n") 
- 
         # value memory is initialised to 0 to enable classifier argmax
         if capacity > self.capacity:
             memset(<void*>(self.value + self.capacity * self.value_stride), 
                     0,
                    (capacity - self.capacity) * self.value_stride * sizeof(double))
         
-        printf("XXX \n") 
- 
         # if capacity smaller than node_count, adjust the counter
         if capacity < self.node_count:
             self.node_count = capacity
-        printf("XXX \n") 
  
         self.capacity = capacity
-        printf("XXX \n") 
-        printf("XXX get out of resize c \n") 
 
         return 0
 
@@ -1058,6 +1081,7 @@ cdef class Tree:
             node.children = NULL
         else:
             node.children = <SIZE_t*>calloc(n_children, sizeof(SIZE_t))
+            memset(node.children, 0, n_children*sizeof(SIZE_t))
             if node.children == NULL: # XXX error
                 return <SIZE_t>(-1)
 
@@ -1129,9 +1153,19 @@ cdef class Tree:
         cdef np.ndarray[SIZE_t] node_ids = np.zeros((n_samples,), dtype=np.intp)
         cdef SIZE_t* id_data = <SIZE_t*> node_ids.data
 
+        cdef SIZE_t nid
+
+        cdef SIZE_t nnid
+        cdef SIZE_t j
+
+        cdef bint debug = 0
+    
+        if debug:
+            printf("array of node ids\n")
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
+                nid  = 0
 
                 while not node.is_leaf:
                     if self.features[node.feature].type == FEATURE_CONTINUOUS:
@@ -1140,9 +1174,25 @@ cdef class Tree:
                         else:
                             node = &self.nodes[node.children[1]]
                     else:
-                        node = &self.nodes[node.children[ <SIZE_t>X[i, node.feature] ]]
+                        if debug:
+                            printf("node[%u] leaf:%u, goto %u subnode,\n", nid, node.is_leaf, <SIZE_t>X[i,node.feature])
+                        nnid = node.children[<SIZE_t>X[i,node.feature]]
+                        if nnid == 0:
+                            printf("Bug node[%u], is_leaf[%u], n_children[%u]\n",nid, node.is_leaf, node.n_children)
+                            printf("X[i,f]=%f\n", X[i,node.feature])
+                            for j in range(node.n_children):
 
-                id_data[i] = <SIZE_t>( node - self.nodes )
+                                printf("%u, ",node.children[j])
+                            printf("\n")
+                            exit(1) 
+                        nid = nnid
+                        node = &self.nodes[nid]
+                           
+
+
+                id_data[i] = nid
+                if debug:
+                    printf("Find leaf node: %u,\n\n ",id_data[i])
 
         return node_ids
 

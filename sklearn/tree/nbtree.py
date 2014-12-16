@@ -12,6 +12,7 @@ from ..base import BaseEstimator, ClassifierMixin
 from ..externals import six
 from ..externals.six.moves import xrange
 from ..feature_selection.from_model import _LearntSelectorMixin
+from ..utils import array2d
 from ..utils.validation import check_arrays
 
 from ._nbtree import DataObject
@@ -82,7 +83,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
             X, y,
             meta,
             sample_weight = None,
-            debug = True
+            debug = False
             ):
        
         # random_state
@@ -103,9 +104,13 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                                  (len(sample_weight), n_samples))
        
         X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
-        
+        if y.ndim == 1:
+            # reshape is necessary to preserve the data contiguity against vs
+            # [:, np.newaxis] that does not.
+            y = np.reshape(y, (-1, 1))
+
+       
         # 1. init Data
-        print "Init DataObject"
         dataobject = DataObject(X, y, meta, sample_weight)
 
         # 2. check parameter
@@ -119,7 +124,6 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         budget = self.budget
         max_candid_features = self.max_candid_features 
 
-        print "Init Criterion, Splitter, Tree"
         criterion = CRITERIA_CLF[self.criterion](dataobject, random_state)
 
         splitter = SPLITTERS[ diffprivacy_mech ](criterion, max_candid_features, random_state)  
@@ -135,13 +139,11 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                               random_state)
 
         # 4. build tree
-        print "Start to build Tree"
         builder.build( tree, dataobject, debug)
-       
-        print "Finished building tree"
-#        if self.data.n_outputs == 1:
-#            self.data.n_classes = self.data.n_classes[0]
-
+        self.data = dataobject 
+        if self.data.n_outputs == 1:
+            self.data.n_classes = self.data.n_classes[0]
+            self.data.classes = self.data.classes[0]
         return self
 
     def predict(self, X):
@@ -163,6 +165,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         if getattr(X, "dtype", None) != DTYPE or X.ndim != 2:
             X = array2d(X, dtype=DTYPE)
 
+
         n_samples, n_features = X.shape
 
         if self._tree is None:
@@ -178,14 +181,14 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
 
         # Classification
         if isinstance(self, ClassifierMixin):
-            if self.n_outputs_ == 1:
-                return self.classes_.take(np.argmax(proba, axis=1), axis=0)
+            if self.data.n_outputs == 1:
+                return self.data.classes.take(np.argmax(proba, axis=1), axis=0)
 
             else:
-                predictions = np.zeros((n_samples, self.n_outputs_))
+                predictions = np.zeros((n_samples, self.data.n_outputs))
 
-                for k in xrange(self.n_outputs_):
-                    predictions[:, k] = self.classes_[k].take(
+                for k in xrange(self.data.n_outputs):
+                    predictions[:, k] = self.data.classes[k].take(
                         np.argmax(proba[:, k], axis=1),
                         axis=0)
 

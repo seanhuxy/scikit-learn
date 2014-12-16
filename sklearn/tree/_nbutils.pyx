@@ -38,9 +38,15 @@ cdef class Stack:
         cdef SIZE_t top = self.top
 
         if top >= self.capacity:
-            if self._resize() < 0:
+            self.capacity *= 2
+            stack = <StackRecord*> realloc(self.stack_,
+                                           self.capacity * sizeof(StackRecord))
+            if stack == NULL:
+                # no free; __dealloc__ handles that
                 return -1
-        
+            self.stack_ = stack
+
+       
         stack = self.stack_
         stack[top].start = start
         stack[top].end   = end

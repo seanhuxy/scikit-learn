@@ -9,8 +9,8 @@ import scipy.sparse as sp
 
 from utils import six
 
-FEATURE_DISCRET = 0
-FEATURE_CONTINUOUS = 1
+FEATURE_CONTINUOUS = 0
+FEATURE_DISCRET = 1
 
 class Feature():
 
@@ -165,16 +165,22 @@ class Dict_Vectorizer():
                         X_row[index] = feature.indices[v]
                     else:
                         X_row[index] = int( (v - feature.min_)/ feature.interval )
+                        if X_row[index] >= feature.n_values:
+                            if X_row[index] == feature.n_values and v == feature.max_:
+                                X_row[index] = feature.n_values-1
+                            else:
+                                error = "Discretizing continous value %f error, min %f, max %f, bins %u"%(v, feature.min_, feature.max_, feature.n_values)
+                                raise ValueError(error)
 
             X_result.append(X_row)
             y_result.append(y_row)
 
         # debug
-        if True:
+        if False:
             print 'n_features =', n_features
             print 'feature dict:\n', feature_name2index 
             print 'features:\n'
-            for f in features:
+            for f in featFalse:#
                 print f
             print 'class\n', class_feature
         
