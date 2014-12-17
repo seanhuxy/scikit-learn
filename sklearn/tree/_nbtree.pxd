@@ -49,7 +49,7 @@ cdef struct Data:
 # wrapper class for Data
 cdef class DataObject:
 
-    cdef Data data
+    cdef Data* data
     #cdef DOUBLE_t* X
     #cdef DOUBLE_t* y
     #cdef DOUBLE_t* sample_weight
@@ -76,7 +76,7 @@ cdef class DataObject:
 # =======================================================================
 cdef class Criterion:
 
-    cdef Data   data
+    cdef Data*   data
 
     cdef SIZE_t* samples_win            # reserved, from splitter
     cdef SIZE_t n_node_samples          # reserved 
@@ -98,18 +98,18 @@ cdef class Criterion:
 
     # Methods
     cdef void init(self,
-                   Data data,
+                   Data* data,
                    SIZE_t* samples_win,
                    SIZE_t start,
-                   SIZE_t end) nogil
+                   SIZE_t end) # nogil
     cdef void update(self, 
                      SIZE_t* samples_win,
                      SplitRecord split_record,
-                     DTYPE_t* Xf) nogil
-    cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) nogil
-    cdef void node_value(self, DOUBLE_t* dest) nogil
+                     DTYPE_t* Xf) # nogil
+    cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
+    cdef void node_value(self, DOUBLE_t* dest) # nogil
 
-    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, DOUBLE_t epsilon) nogil
+    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, DOUBLE_t epsilon) # nogil
 
 
 # =======================================================================
@@ -129,7 +129,7 @@ cdef class Splitter:
     cdef int debug
 
     cdef public Criterion criterion
-    cdef Data data
+    cdef Data* data
 
     cdef SIZE_t* samples_win
     cdef SIZE_t  start, end
@@ -145,22 +145,22 @@ cdef class Splitter:
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
 
     # Methods
-    cdef void init(self, Data data)
+    cdef void init(self, Data* data)
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
-                         DOUBLE_t* weighted_n_node_samples) nogil
+                         DOUBLE_t* weighted_n_node_samples) # nogil
 
-    cdef void _choose_split_point(self) nogil # reserved
+    cdef void _choose_split_point(self) # nogil # reserved
     cdef void _choose_split_feature(self, 
                                 SplitRecord* best, SplitRecord* records, 
-                                SIZE_t size, DOUBLE_t epsilon) nogil
+                                SIZE_t size, DOUBLE_t epsilon) # nogil
 
     cdef void node_split(self,
                          SplitRecord* split_record,
                          SIZE_t* n_node_features, 
-                         DOUBLE_t epsilon) 
+                         DOUBLE_t epsilon) except *
 
-    cdef void node_value(self, DOUBLE_t* dest) nogil
+    cdef void node_value(self, DOUBLE_t* dest) # nogil
 # ==================================================================
 # Builder
 # ==================================================================
@@ -176,7 +176,7 @@ cdef class NBTreeBuilder:
     
     # inner structure
     cdef Splitter    splitter
-    #cdef Data        data    # X, y and metadata
+    #cdef Data*        data    # X, y and metadata
     cdef Tree        tree
 
     cdef object random_state             # Random state
@@ -216,7 +216,8 @@ cdef class Tree:
 
     # Input/Output layout
     cdef Feature* features          # XXX
-    
+    cdef Data* data
+
     cdef public SIZE_t n_features
     cdef SIZE_t* n_classes          # Number of diff labels of each class in y
     cdef public SIZE_t n_outputs    # Number of outputs in y
@@ -235,7 +236,7 @@ cdef class Tree:
    
 
     cdef void _resize(self, SIZE_t capacity)
-    cdef int _resize_c(self, SIZE_t capacity=*) nogil
+    cdef int _resize_c(self, SIZE_t capacity=*) # nogil
 
     cdef SIZE_t _add_node(self, 
                 SIZE_t parent,
@@ -246,7 +247,7 @@ cdef class Tree:
                 SIZE_t n_children,
                 SIZE_t n_node_samples,
                 DOUBLE_t weighted_n_node_samples
-                ) nogil
+                ) # nogil
 
     cpdef np.ndarray predict(self, np.ndarray[DTYPE_t, ndim=2] X)
     cdef np.ndarray _get_value_ndarray(self)

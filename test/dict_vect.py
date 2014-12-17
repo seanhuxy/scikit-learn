@@ -147,6 +147,8 @@ class Dict_Vectorizer():
             if feature.type == FEATURE_CONTINUOUS:
                 feature.n_values = n_bins    
                 feature.interval = (feature.max_ - feature.min_)/n_bins
+                if feature.interval <= 0.0:
+                    feature.interval = 0.1
 
         X_result = []
         y_result = []
@@ -164,7 +166,12 @@ class Dict_Vectorizer():
                     if feature.type == FEATURE_DISCRET:
                         X_row[index] = feature.indices[v]
                     else:
-                        X_row[index] = int( (v - feature.min_)/ feature.interval )
+                        try:
+                            
+                            X_row[index] = int( (v - feature.min_)/ feature.interval )
+                        except ValueError:
+                            print v, feature.min_, feature.max_
+
                         if X_row[index] >= feature.n_values:
                             if X_row[index] == feature.n_values and v == feature.max_:
                                 X_row[index] = feature.n_values-1

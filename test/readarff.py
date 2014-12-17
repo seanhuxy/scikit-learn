@@ -8,7 +8,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import NBTreeClassifier
 from sklearn.cross_validation import cross_val_score
 
-filename = os.getenv("HOME")+"/diffprivacy/dataset/adult-census.arff"
+filename = os.getenv("HOME")+"/diffprivacy/dataset/mushroom.arff"
 
 data, meta = loadarff(filename)
 
@@ -20,8 +20,12 @@ X, y, meta = vectorizer.fit_transform(data_dict, None)
 
 if y.shape[1] == 1:
     y = np.squeeze(y)
+print y.shape
 
-nbtree = NBTreeClassifier(max_depth=4)
+print "X.dtype:", X.dtype
+print "Y.dtype:", y.dtype
+
+nbtree = NBTreeClassifier(max_depth=10)
 
 # nbtree = nbtree.fit(X,y,meta)
 

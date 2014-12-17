@@ -138,8 +138,11 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                               max_candid_features,
                               random_state)
 
+        print "Begin to build the tree"
         # 4. build tree
         builder.build( tree, dataobject, debug)
+        print "Finished to build the tree"
+        
         self.data = dataobject 
         if self.data.n_outputs == 1:
             self.data.n_classes = self.data.n_classes[0]
@@ -162,6 +165,10 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
+        debug = True
+        if debug:
+            print "get into predict"
+        
         if getattr(X, "dtype", None) != DTYPE or X.ndim != 2:
             X = array2d(X, dtype=DTYPE)
 
@@ -178,6 +185,9 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                              % (self.data.n_features, n_features))
 
         proba = self._tree.predict(X)
+
+        if debug:
+            print "get out of tree.predict"
 
         # Classification
         if isinstance(self, ClassifierMixin):
