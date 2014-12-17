@@ -20,7 +20,7 @@ clf = DiffPrivacyDecisionTreeClassifier(random_state=2,
 										budget = budget,
 										max_depth = max_depth)
 print "print y:", y
-exp_output = cross_val_score(clf, X, y, cv=10)
+# exp_output = cross_val_score(clf, X, y, cv=10)
 
 clf.diffprivacy_mech=1
 lap_output = cross_val_score(clf, X, y, cv=10)

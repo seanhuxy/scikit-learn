@@ -8,7 +8,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import NBTreeClassifier
 from sklearn.cross_validation import cross_val_score
 
-filename = os.getenv("HOME")+"/diffprivacy/dataset/mushroom.arff"
+filename = os.getenv("HOME")+"/diffprivacy/dataset/adult.arff"
 
 data, meta = loadarff(filename)
 
@@ -25,7 +25,7 @@ print y.shape
 print "X.dtype:", X.dtype
 print "Y.dtype:", y.dtype
 
-nbtree = NBTreeClassifier(max_depth=10)
+nbtree = NBTreeClassifier(max_depth=5, diffprivacy_mech="no", budget=-10.0, print_tree=True)
 
 # nbtree = nbtree.fit(X,y,meta)
 

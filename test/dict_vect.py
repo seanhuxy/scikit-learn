@@ -51,6 +51,12 @@ class Dict_Vectorizer():
     """
     def __init__(self, sort=True):
         self.sort = sort
+    
+    def feature_name(self, f):
+        return self.features_[f].name
+
+    def feature_value(self, f, v):
+        return self.features_[f].values[v]
 
     def fit(self, X):
         """ init self.feature_names_ and self.feature_values_
@@ -193,21 +199,12 @@ class Dict_Vectorizer():
         
         return np.array(X_result), np.array(y_result), self
 
-    def feature_name(self, feature_index):
-        pass
 
-    def feature_value(self, feature_index, value_index):
-        pass
+    def fit_reverse(self, X, y):
+        
+        n_samples, n_features = X.shape
+        n_classes = y.shape[1]
 
-    def class_label(self, class_label_index):
-        pass
-
-    def origin_X(self, X_index):
-        pass
-
-
-    def get_features(self):
-        pass
 
     def fit_transform(self, X, bins=10, discretize=True):
         ''' return X, y, metadata'''

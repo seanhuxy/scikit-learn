@@ -8,6 +8,8 @@ import numpy as np
 from abc import ABCMeta, abstractmethod
 from warnings import warn
 
+from six import string_types
+
 from ..base import BaseEstimator, ClassifierMixin
 from ..externals import six
 from ..externals.six.moves import xrange
@@ -39,7 +41,7 @@ LAP_DIFF_PRIVACY_MECH = 1
 EXP_DIFF_PRIVACY_MECH = 2
 
 
-CRITERIA_CLF = { "gini": Criterion, "entropy": Criterion } # XXX
+CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy } # XXX
 SPLITTERS = { NO_DIFF_PRIVACY_MECH  : LapSplitter, 
               LAP_DIFF_PRIVACY_MECH : LapSplitter,
               EXP_DIFF_PRIVACY_MECH : ExpSplitter }
@@ -59,8 +61,26 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                 seed = 1,
 
                 max_depth = 5,
-                max_candid_features = 10
+                max_candid_features = 10,
+                min_samples_leaf = 2,
+
+                print_tree = False 
                 ):
+
+        if isinstance(diffprivacy_mech, string_types):
+            if diffprivacy_mech is "no":
+                diffprivacy_mech = NO_DIFF_PRIVACY_MECH
+            elif diffprivacy_mech in ["laplace", "lap", "l"]:
+                diffprivacy_mech = LAP_DIFF_PRIVACY_MECH
+            elif diffprivacy_mech in ["exponential", "exp", "e"]:
+                diffprivacy_mech = EXP_DIFF_PRIVACY_MECH
+            else:
+                raise ValueError("diffprivacy_mech %s is illegal"%diffprivacy_mech)
+        elif isinstance(diffprivacy_mech, (numbers.Integral, np.integer)):
+            if diffprivacy_mech not in [NO_DIFF_PRIVACY_MECH, LAP_DIFF_PRIVACY_MECH, EXP_DIFF_PRIVACY_MECH]:
+                raise ValueError
+        else:
+            raise ValueError
 
         self.diffprivacy_mech = diffprivacy_mech
         self.budget = budget
@@ -75,6 +95,9 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
 
         self.max_depth = max_depth
         self.max_candid_features = max_candid_features 
+        self.min_samples_leaf = min_samples_leaf
+
+        self.print_tree = print_tree
 
         # inner structure
         self._tree = None
@@ -102,14 +125,14 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                 raise ValueError("Number of weights=%d does not match "
                                  "number of samples=%d" %
                                  (len(sample_weight), n_samples))
-       
+      
         X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
         if y.ndim == 1:
             # reshape is necessary to preserve the data contiguity against vs
             # [:, np.newaxis] that does not.
             y = np.reshape(y, (-1, 1))
 
-       
+
         # 1. init Data
         dataobject = DataObject(X, y, meta, sample_weight)
 
@@ -136,12 +159,15 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                               splitter,
                               max_depth,
                               max_candid_features,
-                              random_state)
+                              self.min_samples_leaf,
+                              random_state,
+                              self.print_tree)
 
-        print "Begin to build the tree"
+
+        # print "Begin to build the tree"
         # 4. build tree
         builder.build( tree, dataobject, debug)
-        print "Finished to build the tree"
+        # print "Finished to build the tree"
         
         self.data = dataobject 
         if self.data.n_outputs == 1:
@@ -165,7 +191,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
-        debug = True
+        debug = False
         if debug:
             print "get into predict"
         

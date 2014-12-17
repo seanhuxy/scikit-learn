@@ -106,11 +106,15 @@ cdef class Criterion:
                      SIZE_t* samples_win,
                      SplitRecord split_record,
                      DTYPE_t* Xf) # nogil
-    cdef DOUBLE_t node_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
+    cdef DOUBLE_t node_impurity(self) # nogil
+    cdef DOUBLE_t children_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
+
+    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, 
+                            DOUBLE_t impurity, DOUBLE_t epsilon) # nogil
+
     cdef void node_value(self, DOUBLE_t* dest) # nogil
 
-    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, DOUBLE_t epsilon) # nogil
-
+    cdef void print_distribution(self) #nogil
 
 # =======================================================================
 # Splitter
@@ -119,7 +123,7 @@ cdef struct SplitRecord:
     SIZE_t feature_index    # the index of the feature to split
     DOUBLE_t threshold        # for continuous feature only
     DOUBLE_t improvement    # the improvement by selecting this feature
-   
+
     SIZE_t  n_subnodes
     SIZE_t* n_subnodes_samples
     DOUBLE_t* wn_subnodes_samples 
@@ -158,9 +162,13 @@ cdef class Splitter:
     cdef void node_split(self,
                          SplitRecord* split_record,
                          SIZE_t* n_node_features, 
+                         DOUBLE_t impurity,
                          DOUBLE_t epsilon) except *
 
     cdef void node_value(self, DOUBLE_t* dest) # nogil
+
+    cdef DOUBLE_t node_impurity(self) # nogil
+
 # ==================================================================
 # Builder
 # ==================================================================
@@ -173,7 +181,8 @@ cdef class NBTreeBuilder:
     # tree parameter
     cdef SIZE_t max_depth
     cdef SIZE_t max_candid_features
-    
+    cdef SIZE_t min_samples_leaf 
+
     # inner structure
     cdef Splitter    splitter
     #cdef Data*        data    # X, y and metadata
@@ -181,8 +190,9 @@ cdef class NBTreeBuilder:
 
     cdef object random_state             # Random state
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
+    
+    cdef bint print_tree        # if True, print the tree to stdout 
 
-    # cpdef build(self)
     cpdef build(self, Tree tree, DataObject dataobject, int debug)
 
 # ==================================================================
