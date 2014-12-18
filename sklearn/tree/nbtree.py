@@ -40,8 +40,7 @@ NO_DIFF_PRIVACY_MECH  = 0
 LAP_DIFF_PRIVACY_MECH = 1
 EXP_DIFF_PRIVACY_MECH = 2
 
-
-CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy } # XXX
+CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy, "lapentropy": _nbtree.LapEntropy } # XXX
 SPLITTERS = { NO_DIFF_PRIVACY_MECH  : LapSplitter, 
               LAP_DIFF_PRIVACY_MECH : LapSplitter,
               EXP_DIFF_PRIVACY_MECH : ExpSplitter }
@@ -62,9 +61,9 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
 
                 max_depth = 5,
                 max_candid_features = 10,
-                min_samples_leaf = 2,
+                min_samples_leaf = 0,
 
-                print_tree = False 
+                print_tree = True 
                 ):
 
         if isinstance(diffprivacy_mech, string_types):
@@ -84,9 +83,11 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
 
         self.diffprivacy_mech = diffprivacy_mech
         self.budget = budget
-        
+       
+        if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
+            criterion = "lapentropy"
         self.criterion = criterion
-
+        
         self.seed = seed
         if isinstance(seed, (numbers.Integral, np.integer)):
             self.random_state = np.random.RandomState(seed)

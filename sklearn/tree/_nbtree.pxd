@@ -40,7 +40,8 @@ cdef struct Data:
     SIZE_t  n_features
     SIZE_t  max_n_feature_values # max(number of distint values of all feature)
     SIZE_t  n_continuous_features
-    
+    SIZE_t  avg_n_feature_values
+
     SIZE_t  n_outputs
     # cdef      SIZE_t* classes
     SIZE_t* n_classes
@@ -114,7 +115,7 @@ cdef class Criterion:
 
     cdef void node_value(self, DOUBLE_t* dest) # nogil
 
-    cdef void print_distribution(self) #nogil
+    cdef void print_distribution(self, DOUBLE_t* dest) #nogil
 
 # =======================================================================
 # Splitter
@@ -155,7 +156,7 @@ cdef class Splitter:
                          DOUBLE_t* weighted_n_node_samples) # nogil
 
     cdef void _choose_split_point(self) # nogil # reserved
-    cdef void _choose_split_feature(self, 
+    cdef SIZE_t _choose_split_feature(self, 
                                 SplitRecord* best, SplitRecord* records, 
                                 SIZE_t size, DOUBLE_t epsilon) # nogil
 
