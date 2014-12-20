@@ -27,21 +27,33 @@ class Feature():
         # for continuous feature
         self.max_ = None 
         self.min_ = None
-        self.interval = -1
+        self.interval = np.NaN
 
         if False:
             self.max_ = np.NaN 
             self.min_ = np.NaN
             self.interval = np.NaN
 
+    def discretize(self, v):
+         
+        try:
+            index = int( (v - feature.min_)/ feature.interval )
+        except ValueError:
+            print v, feature.min_, feature.max_ 
+        if index >= feature.n_values:
+            if index == feature.n_values and v == feature.max_:
+                index = feature.n_values-1
+            else:
+                error = "Discretizing continous value %f error, min %f, max %f, bins %u"%(v, feature.min_, feature.max_, feature.n_values)
+                raise ValueError(error)
+
+        return index
+
     def __str__(self):
-        ret = 'a instance of Feature, \n'
-        if self.type is None:
-            ret += "Invalid feature type"
-        elif self.type == FEATURE_DISCRET:
-            ret += ' name is %s,\n n_values is %d,\n indices is %s, \n values is %s' %( self.name, self.n_values, self.indices, self.values )
+        if self.type == FEATURE_DISCRET:
+            ret = 'name {0}\tn_values {1}\nindices {2}\nvalues {3}'.format(self.name, self.n_values, self.indices, self.values)
         else:
-            ret += ' name is %s,\n n_values is %d,\n max_ is %f, min_ is %f, interval is %f' %( self.name, self.n_values, self.max_, self.min_, self.interval )
+            ret = 'name {0}\tn_values {1}\tmax_ {2}\tmin_ {3}\tinterval {4}'.format(self.name, self.n_values, self.max_, self.min_, self.interval)
         
         return ret 
 
@@ -49,14 +61,25 @@ class Dict_Vectorizer():
     """
         use fit_transform to transform the raw dataset to matrix.
     """
-    def __init__(self, sort=True):
-        self.sort = sort
-    
+    def __init__(self):
+        pass 
     def feature_name(self, f):
         return self.features_[f].name
 
     def feature_value(self, f, v):
-        return self.features_[f].values[v]
+        feature = self.features_[f]
+        if   feature.type == FEATURE_CONTINUOUS and not self.discretize:
+            return v
+        elif feature.type == FEATURE_CONTINUOUS and self.discretize:
+            return feature.discretize(v) 
+        else:
+            return self.features_[f].values[v]
+   
+    def print_features(self):
+        for i in range(len(self.features_)):
+            print "feature[{0}]:".format(i)
+            print self.features_[i]
+            print "\n"
 
     def fit(self, X):
         """ init self.feature_names_ and self.feature_values_
@@ -95,6 +118,7 @@ class Dict_Vectorizer():
                 if isinstance(v, six.string_types):
                     if feature.type is None:
                         feature.type = FEATURE_DISCRET
+                        feature.n_values = 0
                     if feature.type == FEATURE_CONTINUOUS:
                         raise ValueError("feature type error")
                     
@@ -136,7 +160,7 @@ class Dict_Vectorizer():
         
         return self
 
-    def _transform(self, X, y):
+    def _transform(self, X, y, discretize):
         """
         :param X: raw matrix of the train
         :param y: list of param which is used to divide the numerical features
@@ -149,12 +173,16 @@ class Dict_Vectorizer():
         feature_name2index = self.feature_name2index_
         
         for feature in features:
-            n_bins = 10 if (y is None or y[feature.name] is None) else y[feature.name]
-            if feature.type == FEATURE_CONTINUOUS:
+
+            if discretize and feature.type == FEATURE_CONTINUOUS:
+                n_bins = 10 if (y is None or y[feature.name] is None) else y[feature.name]
                 feature.n_values = n_bins    
                 feature.interval = (feature.max_ - feature.min_)/n_bins
                 if feature.interval <= 0.0:
                     feature.interval = 0.1
+            if not discretize and feature.type == FEATURE_CONTINUOUS:
+                feature.n_values = 2
+                
 
         X_result = []
         y_result = []
@@ -171,19 +199,12 @@ class Dict_Vectorizer():
                     feature = features[index]
                     if feature.type == FEATURE_DISCRET:
                         X_row[index] = feature.indices[v]
+                    elif discretize and feature.type == FEATURE_CONTINUOUS:
+                        X_row[index] = feature.discretize(v)
+                    elif not discretize and feature.type == FEATURE_CONTINUOUS:
+                        X_row[index] = v
                     else:
-                        try:
-                            
-                            X_row[index] = int( (v - feature.min_)/ feature.interval )
-                        except ValueError:
-                            print v, feature.min_, feature.max_
-
-                        if X_row[index] >= feature.n_values:
-                            if X_row[index] == feature.n_values and v == feature.max_:
-                                X_row[index] = feature.n_values-1
-                            else:
-                                error = "Discretizing continous value %f error, min %f, max %f, bins %u"%(v, feature.min_, feature.max_, feature.n_values)
-                                raise ValueError(error)
+                        raise ValueError
 
             X_result.append(X_row)
             y_result.append(y_row)
@@ -206,7 +227,8 @@ class Dict_Vectorizer():
         n_classes = y.shape[1]
 
 
-    def fit_transform(self, X, bins=10, discretize=True):
+    def fit_transform(self, X, bins=10, discretize=False):
         ''' return X, y, metadata'''
+        self.discretize = discretize
         self.fit(X)
-        return self._transform(X, bins)
+        return self._transform(X, bins, discretize)

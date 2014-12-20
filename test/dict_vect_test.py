@@ -4,7 +4,7 @@ import numpy as np
 from dict_vect import Dict_Vectorizer
 
 
-filename = os.getenv("HOME")+"/diffprivacy/dataset/mushroom.arff"
+filename = os.getenv("HOME")+"/diffprivacy/dataset/adult.arff"
 
 data, meta = loadarff(filename)
 
@@ -18,6 +18,8 @@ print "y", y.shape
 
 n_samples = X.shape[0]
 n_features= X.shape[1]
+
+v.print_features()
 
 for i in range( 10):
     for f in range(n_features):

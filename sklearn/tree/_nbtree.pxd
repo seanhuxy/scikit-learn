@@ -105,7 +105,7 @@ cdef class Criterion:
                    SIZE_t end) # nogil
     cdef void update(self, 
                      SIZE_t* samples_win,
-                     SplitRecord split_record,
+                     SplitRecord* split_record,
                      DTYPE_t* Xf) # nogil
     cdef DOUBLE_t node_impurity(self) # nogil
     cdef DOUBLE_t children_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
@@ -155,13 +155,12 @@ cdef class Splitter:
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          DOUBLE_t* weighted_n_node_samples) # nogil
 
-    cdef void _choose_split_point(self) # nogil # reserved
+    cdef void _choose_split_point(self, SplitRecord* best, DTYPE_t* Xf, DOUBLE_t impurity, DOUBLE_t epsilon) # nogil
     cdef SIZE_t _choose_split_feature(self, 
-                                SplitRecord* best, SplitRecord* records, 
+                                SplitRecord* records, 
                                 SIZE_t size, DOUBLE_t epsilon) # nogil
 
-    cdef void node_split(self,
-                         SplitRecord* split_record,
+    cdef SplitRecord* node_split(self,
                          SIZE_t* n_node_features, 
                          DOUBLE_t impurity,
                          DOUBLE_t epsilon) except *

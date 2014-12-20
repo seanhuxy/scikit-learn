@@ -25,7 +25,13 @@ print y.shape
 print "X.dtype:", X.dtype
 print "Y.dtype:", y.dtype
 
-nbtree = NBTreeClassifier(max_depth=3, diffprivacy_mech="no", criterion="gini", budget=10.0, print_tree=True, min_samples_leaf=0)
+nbtree = NBTreeClassifier(
+            max_depth=3, 
+            diffprivacy_mech="exp", 
+            criterion="gini", 
+            budget=100.0, 
+            print_tree=True, 
+            min_samples_leaf=0)
 
 # nbtree = nbtree.fit(X,y,meta)
 
