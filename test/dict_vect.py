@@ -37,14 +37,14 @@ class Feature():
     def discretize(self, v):
          
         try:
-            index = int( (v - feature.min_)/ feature.interval )
+            index = int( (v - self.min_)/ self.interval )
         except ValueError:
-            print v, feature.min_, feature.max_ 
-        if index >= feature.n_values:
-            if index == feature.n_values and v == feature.max_:
-                index = feature.n_values-1
+            print v, self.min_, self.max_ 
+        if index >= self.n_values:
+            if index == self.n_values and v == self.max_:
+                index = self.n_values-1
             else:
-                error = "Discretizing continous value %f error, min %f, max %f, bins %u"%(v, feature.min_, feature.max_, feature.n_values)
+                error = "Discretizing continous value %f error, min %f, max %f, bins %u"%(v, self.min_, self.max_, self.n_values)
                 raise ValueError(error)
 
         return index
@@ -227,7 +227,7 @@ class Dict_Vectorizer():
         n_classes = y.shape[1]
 
 
-    def fit_transform(self, X, bins=10, discretize=False):
+    def fit_transform(self, X, bins=10, discretize=True):
         ''' return X, y, metadata'''
         self.discretize = discretize
         self.fit(X)

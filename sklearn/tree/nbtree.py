@@ -41,7 +41,7 @@ LAP_DIFF_PRIVACY_MECH = 1
 EXP_DIFF_PRIVACY_MECH = 2
 
 CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy, "lapentropy": _nbtree.LapEntropy } # XXX
-SPLITTERS = { NO_DIFF_PRIVACY_MECH  : LapSplitter, 
+SPLITTERS = { NO_DIFF_PRIVACY_MECH  : ExpSplitter, 
               LAP_DIFF_PRIVACY_MECH : LapSplitter,
               EXP_DIFF_PRIVACY_MECH : ExpSplitter }
 

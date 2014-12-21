@@ -163,6 +163,7 @@ cdef class Splitter:
     cdef SplitRecord* node_split(self,
                          SIZE_t* n_node_features, 
                          DOUBLE_t impurity,
+                         SIZE_t  diffprivacy_mech,
                          DOUBLE_t epsilon) except *
 
     cdef void node_value(self, DOUBLE_t* dest) # nogil

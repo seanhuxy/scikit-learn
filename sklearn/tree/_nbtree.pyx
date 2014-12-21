@@ -292,6 +292,7 @@ cdef class Criterion:
         improvement = impurity - improvement
         if improvement < 0.0:
             printf("Potential Error, improvement %f is less than 0\n",improvement) 
+            printf("%f-%f=%f\n",impurity, improvement, impurity-improvement)
         
         return improvement
 
@@ -324,8 +325,8 @@ cdef class Criterion:
         cdef DOUBLE_t* label_count_total = dist 
 
         if label_count_total == NULL:
-            printf("Warning, dist is NULL\n")
-            # label_count_total = self.label_count_total
+            #printf("Warning, dist is NULL\n")
+            label_count_total = self.label_count_total
 
         cdef SIZE_t k
         for k in range(n_outputs):
@@ -386,8 +387,7 @@ cdef class Gini(Criterion):
 
         cdef UINT32_t* rand = &self.rand_r_state
 
-        #cdef DOUBLE_t* label_count = label_count 
-        wn_samples += noise(epsilon, rand) # XXX
+        #wn_samples += noise(epsilon, rand) # XXX
 
         cdef DOUBLE_t total, gini, count, tmp
         cdef SIZE_t k, c
@@ -408,7 +408,7 @@ cdef class Gini(Criterion):
             gini = 0.0
 
             for c in range(n_classes[k]):
-                count = label_count[c] + noise(epsilon, rand) # XXX
+                count = label_count[c] # + noise(epsilon, rand) # XXX
                 if wn_samples > 0.0:
                     tmp = count/wn_samples 
                     gini += tmp*tmp 
@@ -715,6 +715,7 @@ cdef class Splitter:
     cdef SplitRecord* node_split(self, 
             SIZE_t* ptr_n_node_features,
             DOUBLE_t impurity,
+            SIZE_t diffprivacy_mech,
             DOUBLE_t epsilon) except *:
         ''' 
             Calculate:
@@ -732,7 +733,8 @@ cdef class Splitter:
         cdef SplitRecord* current = NULL
         cdef SplitRecord* best = <SplitRecord*> calloc(1, sizeof(SplitRecord))
         _init_split(best)
-        
+       
+        cdef DOUBLE_t best_improvement = -INFINITY
         cdef SIZE_t best_i = -1
 
         cdef Data* data = self.data
@@ -767,10 +769,6 @@ cdef class Splitter:
         
         f_j = 0
         while f_j <= f_i :
-            current = &feature_records[f_j]
-            current.feature_index = features_win[f_j]
-            feature = &data.features[ features_win[f_j] ]
-
             # copy to Xf
             for p in range(start, end):
                 # Xf[p] = X[sample_index, feature_index]
@@ -793,12 +791,20 @@ cdef class Splitter:
                 # goes to next candidate feature
                 
 
-            # not constant feature
+            # not constant featur.format(best_i, f_i)e
             else:                
+                current = &feature_records[f_j]
+                current.feature_index = features_win[f_j]
+                feature = &data.features[ features_win[f_j] ]
+
                 # if continuous feature
                 if feature.type == FEATURE_CONTINUOUS:
                     if debug:
                         printf("f[%u] type[%u], choose split points\n", current.feature_index, data.features[current.feature_index])
+
+                    if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
+                        printf("Error, Laplace Mech does not support continuouse feature\n")
+                        exit(1)
                     current.n_subnodes = 2
                     self._choose_split_point(current, Xf, impurity, epsilon)
                     if debug:
@@ -838,31 +844,44 @@ cdef class Splitter:
                     current.improvement = self.criterion.improvement(current.wn_subnodes_samples,
                                                                 current.n_subnodes,
                                                                 impurity, epsilon_per_feature)  # XXX only for laplace mech
-                if debug:
-                    printf("f[%u] score=%f\n\n", current.feature_index,current.improvement)
+                if 1:
+                    printf("[%d] f[%u] score=%f\n", f_j, current.feature_index,current.improvement)
                 
                 #feature_records[f_j] = current
-                if current.improvement > best.improvement:
+                if current.improvement > best_improvement:
                 #    best = current
+                    best_improvement = current.improvement
                     best_i = f_j
                 f_j += 1
 
-        best_i = self._choose_split_feature(feature_records, 
-                                            f_i+1,    # n_features
-                                            epsilon)  # XXX only for exponential mech
+        if diffprivacy_mech == EXP_DIFF_RPIVACY_MECH:
+            best_i = self._choose_split_feature(feature_records, 
+                                                f_i+1,    # n_features
+                                                epsilon)  # XXX only for exponential mech
 
-        current = &feature_records[best_i]
-        if debug:
-            for i in range(current.n_subnodes):
-                printf("Selected feature[%d] %d, %f\n",i, current.n_subnodes_samples[i], current.wn_subnodes_samples[i])
-            printf("\n") 
+        # if there's no any feature which can be splitted 
+        if best_i < 0:
+            if f_i != -1 or f_j != 0:
+                raise ValueError("Error, f_i[{0}] and f_j[{1}] should be -1, 0 \
+                                    when there is not best split feature".format(f_i, f_j))
+                exit(1)
+
+            return NULL
+        if best_i > f_i:
+            raise ValueError("best split feature index {0} \
+                              is greater than the max possible index {1}\n".format(best_i, f_i))
+            exit(1)
+
         _copy_split(&feature_records[best_i], best)
        
+        # switch best_i and f_i in features_win
+        tmp                  = features_win[best_i]
+        features_win[best_i] = features_win[f_i]
+        features_win[f_i]    = tmp
+
+        if 1:
+            printf("selected i[%d] f[%u] score %f\n", best_i, best.feature_index, best.improvement)
         if debug:
-            printf("selected f[%u] score %f\n", best.feature_index, best.improvement)
-            for i in range(best.n_subnodes):
-                printf("[%d] %d, %f\n",i, best.n_subnodes_samples[i], best.wn_subnodes_samples[i])
-            printf("\n")     
             if best.improvement == 0.0:
                 printf("node impurity is %f\n", impurity)
                 printf("distribution of feature[%u]:\n",best.feature_index)
@@ -870,23 +889,8 @@ cdef class Splitter:
                     printf("%u ",best.n_subnodes_samples[i])
                 printf("\n")
  
-        if best.feature_index >= 0:
-            # switch best to f_i
-            if best_i < 0 or best_i > f_i:
-                raise ValueError("Error, best_i should be greater than 0 and smaller or equal to f_i")
-                exit(1)
-            tmp                  = features_win[best_i]
-            features_win[best_i] = features_win[f_i]
-            features_win[f_i]    = tmp
-
-        else: 
-            if f_i != -1 or f_j != 0:
-                raise ValueError("Error, f_i[%u] and f_j[%u] should be 0 when there is not best split feature"%(f_i, f_j))
-
         # free
         for i in range(n_node_features):
-            if debug:
-                printf("feature record %p\n", feature_records[i].n_subnodes_samples)
             free(feature_records[i].n_subnodes_samples)
             free(feature_records[i].wn_subnodes_samples)
         free(feature_records)
@@ -947,6 +951,8 @@ cdef class ExpSplitter(Splitter):
     cdef void _choose_split_point(self, SplitRecord* best, DTYPE_t* Xf,DOUBLE_t impurity, DOUBLE_t epsilon):# nogil:
 
         cdef SIZE_t i
+        cdef SIZE_t best_i
+        cdef DOUBLE_t best_improvement = -INFINITY
         cdef SIZE_t p
         cdef SIZE_t idx = 0
         cdef SIZE_t start = self.start
@@ -1017,6 +1023,10 @@ cdef class ExpSplitter(Splitter):
                     #printf("\t[%d]threshold %f, score %f\n",idx,current.threshold, current.improvement)
                     printf("\t[%d] %d, %d\n",idx, current.n_subnodes_samples[0], current.n_subnodes_samples[1])
 
+                if current.improvement > best_improvement:
+                    best_improvement = current.improvement
+                    best_i = idx
+
                 idx += 1
 
         n_split_points = idx+1
@@ -1024,11 +1034,13 @@ cdef class ExpSplitter(Splitter):
             printf("Warning, there's only %d split points for choosing, samples[%d-%d]\n", 
                     n_split_points, start, end)
 
-        idx = draw_from_exponential_mech( records, n_split_points, sensitivity, epsilon, rand)
+        if epsilon > 0.0:
+            # weight XXX
+            idx = draw_from_exponential_mech( records, n_split_points, sensitivity, epsilon, rand)
+        else:
+            idx = best_i
+
         current = &records[idx]
-        if debug:
-            printf("selected[%d], subnodes %d, %d\n", idx, records[idx].n_subnodes_samples[0], records[idx].n_subnodes_samples[1])
-            printf("current[%d], subnodes %d, %d\n", idx, current.n_subnodes_samples[0], current.n_subnodes_samples[1])
 
         # deep copy
         _copy_split(current, best)
@@ -1097,7 +1109,6 @@ cdef class DataObject:
         # class
         cdef SIZE_t n_outputs = y.shape[1]
         # y = np.copy(y) # XXX why copy?
-        # cdef SIZE_t* classes = []
         cdef SIZE_t* n_classes = <SIZE_t*>calloc(n_outputs, sizeof(SIZE_t))
         cdef SIZE_t max_n_classes = 0
         for k in range( n_outputs ):
@@ -1139,7 +1150,7 @@ cdef class DataObject:
 
         avg_n_feature_values /= n_features
 
-        if 1:
+        if 0:
             printf("features:\n")
             for i in range(n_features):
                 if features[i].type == FEATURE_DISCRETE: 
@@ -1246,7 +1257,7 @@ cdef class NBTreeBuilder:
         cdef SIZE_t min_samples_leaf =  self.min_samples_leaf
 
         if min_samples_leaf <= 0:
-            min_samples_leaf = data.avg_n_feature_values * 2
+            min_samples_leaf = data.avg_n_feature_values
         if 1:
             printf("min_samples_leaf is %d\n", min_samples_leaf)
 
@@ -1362,7 +1373,7 @@ cdef class NBTreeBuilder:
                 if not is_leaf:
                     # with gil:
                     if 1:
-                        split_record = splitter.node_split(&n_node_features, impurity, epsilon_per_action )
+                        split_record = splitter.node_split(&n_node_features, impurity, diffprivacy_mech,  epsilon_per_action )
                         if split_record != NULL:
             
                             is_leaf = is_leaf or (split_record.feature_index == -1)
@@ -1370,7 +1381,7 @@ cdef class NBTreeBuilder:
                             # XXX no improvement will be made if split this node, so let it be a leaf
                             if split_record.improvement <= 0.0:
                                 is_leaf = True
-                                if 1:
+                                if debug:
                                     printf("cancel to split in f[%d]\n",split_record.feature_index)
                         else:
                             is_leaf = True
@@ -1396,13 +1407,16 @@ cdef class NBTreeBuilder:
                     # store class distribution into node.values
                     splitter.node_value(tree.value+node_id*tree.value_stride)
                     # add noise to the class distribution
-                    noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
+                    if epsilon_per_action > 0.0:
+                        noise_distribution(epsilon_per_action, tree.value+node_id*tree.value_stride, data, rand)
                     
                     
                     if print_tree and node_id != 0:
                         for pad in range(depth):
                             printf(" | ")
                         printf("f[%u]=%u n=%u\t", tree.nodes[parent].feature, index, n_node_samples)
+                        splitter.criterion.print_distribution(NULL)
+                        printf("\t\t")
                         splitter.criterion.print_distribution(tree.value+node_id*tree.value_stride)
                         printf("\n",n_node_samples)
                 else:
@@ -1851,6 +1865,9 @@ cdef void noise_distribution(DOUBLE_t epsilon, DOUBLE_t* dest, Data* data, UINT3
     cdef SIZE_t stride = data.max_n_classes
     cdef SIZE_t zero_cnt = 0
 
+    if epsilon <= 0.0:
+        return
+
     for k in range(n_outputs):
         
         for i in range(n_classes[k]):
@@ -1867,30 +1884,52 @@ cdef void noise_distribution(DOUBLE_t epsilon, DOUBLE_t* dest, Data* data, UINT3
         dest += stride
 
 
-cdef SIZE_t draw_from_distribution(DOUBLE_t* dist, SIZE_t size, UINT32_t* rand) except -1: #nogil
-    """ numbers in arr should be greater than 0 """
+cdef void normalize(double* dist, SIZE_t size):
 
-    cdef DOUBLE_t total = 0.0
-    cdef DOUBLE_t point = 0.0 
-    cdef DOUBLE_t current = 0.0 
-
+    cdef double total = 0.0
     cdef SIZE_t i = 0
     for i in range(size):
         if dist[i] < 0.0:
-            #with gil:
             raise("dist[%d]=%f should be greater than 0"%(i,dist[i]))
-            #return -1
+            exit(1)
+        total += dist[i] 
+
+    if total == 0.0:
+        return
+
+    for i in range(size):
+        dist[i] = dist[i]/total
+
+
+cdef SIZE_t draw_from_distribution(DOUBLE_t* dist, SIZE_t size, UINT32_t* rand) except -1: #nogil
+    """ numbers in arr should be greater than 0 """
+
+    cdef bint debug = 1
+    cdef DOUBLE_t total = 0.0
+    cdef DOUBLE_t point = 0.0 
+    cdef DOUBLE_t current = 0.0 
+    cdef SIZE_t i = 0
+
+    normalize(dist, size)
+
+    for i in range(size):
         total += dist[i] 
 
     # if numbers in arr all equal to 0
     if total == 0.0:
         return rand_int(size, rand)
 
-    dist[i] = dist[i]/total
-
     point = rand_double(rand)
+    if debug:
+        printf("total is %f,  random %f from (0,1)\n", total,  point)
+
+    if debug:
+        for i in range(size):
+            printf("%f, ", dist[i])
+        printf("\n")
 
     i = 0
+    current = 0.0
     for i in range(size):
         current += dist[i]
         if current > point:
@@ -1898,45 +1937,78 @@ cdef SIZE_t draw_from_distribution(DOUBLE_t* dist, SIZE_t size, UINT32_t* rand) 
 
     return size-1
 
+cdef SIZE_t correct_count[3]
+correct_count[0] = 0
+correct_count[1] = 0
+correct_count[2] = 0
 
 cdef SIZE_t draw_from_exponential_mech( SplitRecord* records, int size, double sensitivity, double epsilon, UINT32_t* rand) except -1: #nogil
 
-    cdef bint debug = 0
+    cdef bint debug = 1
 
     cdef double* improvements
+    cdef double* improvements_minusmax
+    cdef double* normalized_improvements
     cdef double max_improvement = -INFINITY
+    cdef int best_i
     cdef int i
     cdef int ret_idx
+    cdef int j
 
+    epsilon = 4.0 #XXX
     if debug:
         printf("draw_from_exponential_mech: e=%f s=%f n=%d\n", epsilon, sensitivity, size)
 
     improvements = <double*>calloc(size, sizeof(double))
+    improvements_minusmax = <double*>calloc(size,sizeof(double))
+    normalized_improvements = <double*>calloc(size,sizeof(double))
     
     i = 0
     for i in range(size):
         improvements[i] = records[i].improvement
+        normalized_improvements[i] = records[i].improvement
         if improvements[i] > max_improvement:
             max_improvement = improvements[i]
+            best_i = i
 
+    normalize(normalized_improvements, size)
     # rescale from 0 to 1
     i = 0
     for i in range(size):
         if debug:
-            printf("%d: f[%u] %f\t",i, records[i].feature_index, improvements[i])
+            printf("%2d: f[%2d] %f\t",i, records[i].feature_index, improvements[i])
 
-        # improvements[i] -= max_improvement
+        improvements_minusmax[i] = improvements[i] -  max_improvement
+
         improvements[i] = exp(improvements[i]*epsilon/(2*sensitivity))
         if debug:
-            printf("%f\n" ,improvements[i])
+            printf("%f\t%f\t", improvements[i], improvements_minusmax[i])
 
+        improvements_minusmax[i] = exp(improvements_minusmax[i]*epsilon/(2*sensitivity))
+        if debug:
+            printf("%f\t" ,improvements_minusmax[i])
+
+        if debug:
+            printf("%f\t", normalized_improvements[i])
+        # normalized_improvements[i] = exp(normalized_improvements[i]*epsilon/(2*sensitivity))
+        #if debug:
+        #    printf("%f\n", normalized_improvements[i])
     ret_idx = draw_from_distribution(improvements, size, rand)
-
-    if debug:
-        printf("selected the %dth feature\n", ret_idx) 
+    i = draw_from_distribution(improvements_minusmax, size, rand)
+    j = draw_from_distribution(normalized_improvements,size,rand)
     
+
+    if ret_idx == best_i:
+        correct_count[0] += 1
+    if i == best_i:
+        correct_count[1] += 1
+    if j == best_i:
+        correct_count[2] += 1
+    if debug:
+        printf("selected best %d,   %d %d %d \n", best_i, ret_idx, i, j) 
+        printf("correct %d : %d : %d\n", correct_count[0], correct_count[1], correct_count[2] )
     free(improvements)
-    return ret_idx
+    return j
 
 
 # ===============================================================
