@@ -193,6 +193,8 @@ cdef class NBTreeBuilder:
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
     
     cdef bint print_tree        # if True, print the tree to stdout 
+    cdef bint is_prune
+    cdef double CF
 
     cpdef build(self, Tree tree, DataObject dataobject, int debug)
 
@@ -213,7 +215,6 @@ cdef struct Node:
     SIZE_t* children    # an array, storing ids of the children of this node
     SIZE_t  n_children  # size = feature.n_values
 
-#
     # For leaf node
     # DOUBLE_t* values    # (only for leaf node) Array of class distribution 
                         #   (n_outputs, max_n_classes)
@@ -222,6 +223,7 @@ cdef struct Node:
     # reserved
     SIZE_t n_node_samples   # Number of samples at this node
     DOUBLE_t weighted_n_node_samples   # Weighted number of samples at this node
+    DOUBLE_t noise_n_node_samples
 
 cdef class Tree:
 
@@ -234,7 +236,6 @@ cdef class Tree:
     cdef public SIZE_t n_outputs    # Number of outputs in y
     cdef public SIZE_t max_n_classes# max(n_classes)
 
-
     # Inner structures
     cdef public SIZE_t capacity     # Capacity of trees
     cdef public SIZE_t node_count   # Counter for node IDs
@@ -242,9 +243,7 @@ cdef class Tree:
     cdef double* value              # Array of class distribution, (capacity, n_outputs, max_n_classes)
     cdef SIZE_t value_stride        # = n_outputs*max_n_classes
 
-
     cdef public SIZE_t max_depth    # Max depth of the tree
-   
 
     cdef void _resize(self, SIZE_t capacity)
     cdef int _resize_c(self, SIZE_t capacity=*) # nogil
@@ -257,7 +256,8 @@ cdef class Tree:
                 DOUBLE_t threshold,
                 SIZE_t n_children,
                 SIZE_t n_node_samples,
-                DOUBLE_t weighted_n_node_samples
+                DOUBLE_t weighted_n_node_samples,
+                DOUBLE_t noise_n_node_samples
                 ) # nogil
 
     cpdef np.ndarray predict(self, np.ndarray[DTYPE_t, ndim=2] X)
@@ -266,4 +266,13 @@ cdef class Tree:
     cpdef np.ndarray apply(self, np.ndarray[DTYPE_t, ndim=2] X)
     # cpdef compute_feature_importances(self, normalize=*)
 
+    cdef void calibrate_n_node_samples(self, SIZE_t node_id, DOUBLE_t fixed_n_node_samples)
+    cdef void calibrate_class_distribution(self, SIZE_t node_id) 
+    cdef double n_errors(self, double* counts, double noise_n_node_samples)
+    cdef double leaf_error(self, SIZE_t node_id, double CF)
+    cdef double node_error(slef, SIZE_t node_id, double CF)
+    cdef void prune(self, SIZE_t node_id, double CF)
+
+    cdef void print_tree(self)
+    cdef void print_node(self, SIZE_t node_id, SIZE_t feature, SIZE_t index, SIZE_t depth)
 

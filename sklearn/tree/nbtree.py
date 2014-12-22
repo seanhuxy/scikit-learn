@@ -63,7 +63,9 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                 max_candid_features = 10,
                 min_samples_leaf = 0,
 
-                print_tree = True 
+                print_tree = True ,
+                is_prune = True,
+                CF = 0.25,
                 ):
 
         if isinstance(diffprivacy_mech, string_types):
@@ -99,6 +101,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         self.min_samples_leaf = min_samples_leaf
 
         self.print_tree = print_tree
+        self.is_prune = is_prune
+        self.CF = CF
 
         # inner structure
         self._tree = None
@@ -162,7 +166,9 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                               max_candid_features,
                               self.min_samples_leaf,
                               random_state,
-                              self.print_tree)
+                              self.print_tree,
+                              self.is_prune,
+                              self.CF)
 
 
         # print "Begin to build the tree"
@@ -192,7 +198,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
-        debug = False
+        debug = True
         if debug:
             print "get into predict"
         

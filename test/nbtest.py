@@ -15,7 +15,8 @@ def test(dataset="adult.arff",
         budget=-1.0, 
         criterion="entropy", 
         min_samples_leaf=0, 
-        print_tree = True):
+        print_tree = False,
+        is_prune = True):
     
     filename = os.getenv("HOME")+"/diffprivacy/dataset/"+dataset
 
@@ -27,10 +28,11 @@ def test(dataset="adult.arff",
     print "budget\t\t\t", budget
     print "criterion\t\t", criterion
     print "print_tree\t\t", print_tree
+    print "is prune\t\t", is_prune
 
     data, meta = loadarff(filename) 
     data_dict = [dict(zip(data.dtype.names, record)) for record in data] 
-    print meta
+#    print meta
     vectorizer = Dict_Vectorizer()
     X, y, meta = vectorizer.fit_transform(data_dict, None, discretize=discretize)
 
@@ -43,7 +45,8 @@ def test(dataset="adult.arff",
                 criterion=criterion, 
                 budget=budget, 
                 print_tree=print_tree, 
-                min_samples_leaf=min_samples_leaf)
+                min_samples_leaf=min_samples_leaf,
+                is_prune = is_prune)
     # nbtree = nbtree.fit(X,y,meta)
     output =  cross_val_score(nbtree, X, y, cv=10, fit_params={'meta':meta, 'debug':False})
 
@@ -87,7 +90,7 @@ def debug_zero_nodp_gini():
     diffprivacy_mech = "no"
     criterion = "gini"
 
-    ret = test(max_depth = 10, diffprivacy_mech = diffprivacy_mech, criterion = criterion)
+    ret = test(max_depth = 7, diffprivacy_mech = diffprivacy_mech, criterion = criterion)
 
     print "max_depth[{0}]   {1}".format(10, ret)
 
@@ -134,7 +137,7 @@ def test_exp_gini():
 def test_one_exp_gini():
     diffprivacy_mech = "exp"
     criterion = "gini"
-    max_depth = 5
+    max_depth = 10
     budget =  5.0 
 
     accuracy = 0 
@@ -155,7 +158,7 @@ if __name__ == "__main__":
     #test_nodp_gini()
 #    test_lap_entropy()
 #    test_exp_gini()
-    test_one_exp_gini()
-    #debug_zero_nodp_gini()
+    #test_one_exp_gini()
+    debug_zero_nodp_gini()
     #test()
 

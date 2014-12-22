@@ -1,7 +1,7 @@
 from libc.stdio cimport printf
 from libc.stdlib cimport calloc, free, realloc, exit
 from libc.string cimport memcpy, memset
-from libc.math   cimport log, exp, sqrt
+from libc.math   cimport log, exp, sqrt, pow
 from cpython cimport Py_INCREF, PyObject
 
 from sklearn.tree._nbutils cimport Stack, StackRecord
@@ -11,6 +11,8 @@ from sklearn.tree._tree cimport sort, rand_int, rand_double # XXX
 import numpy as np
 cimport numpy as np
 np.import_array() # XXX
+
+from scipy.stats import norm
 
 from numpy import float32 as DTYPE
 from numpy import float64 as DOUBLE
@@ -280,7 +282,8 @@ cdef class Criterion:
         # sum up children_impurity of each subset 
         for i in range(n_subnodes):
             tmp =self.children_impurity(label_count, wn_subnodes_samples[i], epsilon) # XXX
-            tmp = (wn_subnodes_samples[i]/self.weighted_n_node_samples)*tmp
+            #tmp = (wn_subnodes_samples[i]/self.weighted_n_node_samples)*tmp
+            tmp = wn_subnodes_samples[i]*tmp
             improvement += tmp 
             if debug:
                 printf("%f, ", tmp)
@@ -289,12 +292,12 @@ cdef class Criterion:
         if debug:
             printf("\n%f-%f=%f\n",impurity, improvement, impurity-improvement)
 
-        improvement = impurity - improvement
+        #improvement = impurity - improvement
         if improvement < 0.0:
             printf("Potential Error, improvement %f is less than 0\n",improvement) 
             printf("%f-%f=%f\n",impurity, improvement, impurity-improvement)
         
-        return improvement
+        return -improvement
 
 
     cdef void node_value(self, DOUBLE_t* dest): # nogil:
@@ -844,7 +847,7 @@ cdef class Splitter:
                     current.improvement = self.criterion.improvement(current.wn_subnodes_samples,
                                                                 current.n_subnodes,
                                                                 impurity, epsilon_per_feature)  # XXX only for laplace mech
-                if 1:
+                if 0:
                     printf("[%d] f[%u] score=%f\n", f_j, current.feature_index,current.improvement)
                 
                 #feature_records[f_j] = current
@@ -1221,7 +1224,9 @@ cdef class NBTreeBuilder:
                     SIZE_t max_candid_features,
                     SIZE_t min_samples_leaf,
                     object random_state,
-                    bint   print_tree
+                    bint   print_tree,
+                    bint   is_prune,
+                    double CF
                     ):
 
         self.diffprivacy_mech = diffprivacy_mech
@@ -1240,6 +1245,8 @@ cdef class NBTreeBuilder:
         self.rand_r_state = random_state.randint(0, RAND_R_MAX)
         
         self.print_tree = print_tree
+        self.is_prune = is_prune
+        self.CF = CF
 
     # cpdef build(self):
     cpdef build(self,
@@ -1262,6 +1269,7 @@ cdef class NBTreeBuilder:
             printf("min_samples_leaf is %d\n", min_samples_leaf)
 
         cdef bint print_tree = self.print_tree
+        cdef bint is_prune = self.is_prune
         if debug:
             printf("Init capacity of tree\n")
 
@@ -1308,7 +1316,7 @@ cdef class NBTreeBuilder:
         cdef SIZE_t index
         cdef SIZE_t n_node_features
         cdef SIZE_t n_node_samples
-        cdef DOUBLE_t noisy_n_node_samples
+        cdef DOUBLE_t noise_n_node_samples
         cdef DOUBLE_t weighted_n_node_samples
         cdef SIZE_t node_id
 
@@ -1357,17 +1365,17 @@ cdef class NBTreeBuilder:
                  
                 is_leaf = (depth >= max_depth or n_node_features <= 0)
                 if epsilon_per_action > 0.0:
-                    noisy_n_node_samples = <DOUBLE_t>n_node_samples + noise(epsilon_per_action, rand) # XXX
+                    noise_n_node_samples = <DOUBLE_t>n_node_samples + noise(epsilon_per_action, rand) # XXX
                     if 0:
-                        printf("noisy_n_node_samples %f, max_n_f_values %u, max_n_classes %u\n",
-                                noisy_n_node_samples, data.max_n_feature_values, data.max_n_classes)
+                        printf("noise_n_node_samples %f, max_n_f_values %u, max_n_classes %u\n",
+                                noise_n_node_samples, data.max_n_feature_values, data.max_n_classes)
 
-                    is_leaf = is_leaf or noisy_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action
+                    is_leaf = is_leaf or noise_n_node_samples/(data.max_n_feature_values*data.max_n_classes) < sqrt(2.0)/epsilon_per_action
 
                     if 0:
                         printf("is_leaf: %d\n", is_leaf)
                 else:
-                     
+                    noise_n_node_samples = <DOUBLE_t> n_node_samples 
                     is_leaf = is_leaf or ( n_node_samples <= min_samples_leaf )
 
                 if not is_leaf:
@@ -1379,10 +1387,10 @@ cdef class NBTreeBuilder:
                             is_leaf = is_leaf or (split_record.feature_index == -1)
                       
                             # XXX no improvement will be made if split this node, so let it be a leaf
-                            if split_record.improvement <= 0.0:
-                                is_leaf = True
-                                if debug:
-                                    printf("cancel to split in f[%d]\n",split_record.feature_index)
+                            #if split_record.improvement <= 0.0:
+                            #    is_leaf = True
+                            #    if debug:
+                            #        printf("cancel to split in f[%d]\n",split_record.feature_index)
                         else:
                             is_leaf = True
                 if is_leaf:
@@ -1401,7 +1409,8 @@ cdef class NBTreeBuilder:
                             NO_THRESHOLD,
                             0,                      # no children
                             n_node_samples,
-                            weighted_n_node_samples # xxx
+                            weighted_n_node_samples, # xxx
+                            noise_n_node_samples
                             )
 
                     # store class distribution into node.values
@@ -1414,7 +1423,7 @@ cdef class NBTreeBuilder:
                     if print_tree and node_id != 0:
                         for pad in range(depth):
                             printf(" | ")
-                        printf("f[%u]=%u n=%u\t", tree.nodes[parent].feature, index, n_node_samples)
+                        printf("f[%2u]=%2u n=%3u\t", tree.nodes[parent].feature, index, n_node_samples)
                         splitter.criterion.print_distribution(NULL)
                         printf("\t\t")
                         splitter.criterion.print_distribution(tree.value+node_id*tree.value_stride)
@@ -1435,7 +1444,8 @@ cdef class NBTreeBuilder:
                             split_record.threshold,
                             split_record.n_subnodes,  # number of children
                             n_node_samples, 
-                            weighted_n_node_samples # XXX
+                            weighted_n_node_samples, # XXX
+                            noise_n_node_samples
                             )
                     if 0:
                         printf("Selected feature[%u],\n\tn_children[%u], n_node_samples[%u]\n\n",
@@ -1489,9 +1499,35 @@ cdef class NBTreeBuilder:
         
         if rc == -1:
             raise MemoryError()
-            # TODO: prune
+        # TODO: prune
 
+        
+        if is_prune:
+            printf("calibrate_n_node_samples begins\n")
+            tree.calibrate_n_node_samples(0, tree.nodes[0].noise_n_node_samples)
+            
+            printf("calibrate_class_distribution begins\n")
+            tree.calibrate_class_distribution( 0 )
+        if 1:
+            # print tree
+            printf("tree.print_tree\n")
+            tree.print_tree()
+         
+        if 1:
+            printf("prune begins\n")
+            tree.prune(0, self.CF)
+            printf("prune ends\n")
 
+        if 1:
+            # print tree
+            printf("after pruning\n")
+            tree.print_tree()
+         
+        if 0:
+            # print tree
+            printf("tree.print_tree\n")
+            tree.print_tree()
+            
         if 0:
             for i in range(tree.node_count):
                 printf("Node[%u], is_leaf[%u], n_children[%u]\n",i, tree.nodes[i].is_leaf, tree.nodes[i].n_children)
@@ -1627,7 +1663,8 @@ cdef class Tree:
                           DOUBLE_t threshold, 
                           SIZE_t n_children,
                           SIZE_t n_node_samples, 
-                          DOUBLE_t weighted_n_node_samples
+                          DOUBLE_t weighted_n_node_samples,
+                          DOUBLE_t noise_n_node_samples
                           ):#nogil:
         """Add a node to the tree.
         The new node registers itself as the child of its parent.
@@ -1677,6 +1714,7 @@ cdef class Tree:
  
         node.n_node_samples = n_node_samples
         node.weighted_n_node_samples = weighted_n_node_samples
+        node.noise_n_node_samples = noise_n_node_samples
 
         if 0:
            # printf("add node 3\n")
@@ -1788,6 +1826,220 @@ cdef class Tree:
 
         return node_ids
 
+    
+    cdef void calibrate_n_node_samples(self, SIZE_t node_id, DOUBLE_t fixed_n_node_samples):
+        ''' top down calibrate n_node_samples of each nodes'''
+
+        cdef Node* nodes = self.nodes
+        cdef SIZE_t child_id 
+        cdef Node* child
+
+        cdef DOUBLE_t total = 0.0
+        cdef SIZE_t i
+
+        cdef Node* parent = &nodes[node_id]
+        parent.noise_n_node_samples = fixed_n_node_samples
+        
+        if parent.is_leaf:
+            return
+
+        for i in range(parent.n_children):
+            child = &nodes[parent.children[i]]
+            total += child.noise_n_node_samples
+
+        if total == 0.0:
+            for i in range(parent.n_children):
+                child = &nodes[parent.children[i]]
+                printf("%f, ", child.noise_n_node_samples)
+            printf("\n")
+            exit(0)
+
+        for i in range(parent.n_children):
+            child_id = parent.children[i]
+            child = &nodes[child_id]
+            self.calibrate_n_node_samples( child_id, (child.noise_n_node_samples/total)*parent.noise_n_node_samples )
+        
+    cdef void calibrate_class_distribution(self,SIZE_t node_id):
+        ''' buttom up calibarate class distribution '''
+
+        cdef Node* nodes = self.nodes
+        cdef double* value = self.value
+        cdef SIZE_t value_stride = self.value_stride
+        
+        cdef SIZE_t n_outputs  = self.data.n_outputs
+        cdef SIZE_t* n_classes = self.data.n_classes
+        cdef SIZE_t stride     = self.data.max_n_classes
+
+        cdef Node* node     = &nodes[node_id]
+        cdef double* counts  = value + node_id * value_stride    
+        
+        cdef double total = 0.0
+        cdef SIZE_t k, c, i
+
+        # for leaf node
+        if node.is_leaf == True:
+            for k in range(n_outputs):
+                total = 0.0
+                for c in range(n_classes[k]):
+                    total += counts[ k*stride + c]
+
+                if total == 0.0:
+                    continue
+
+                for c in range(n_classes[k]):
+                    counts[k*stride + c] = node.noise_n_node_samples * (counts[k*stride + c] / total) 
+
+            return
+
+        # for inner node
+        counts = value + node_id * value_stride
+        for k in range(n_outputs):
+            for c in range(n_classes[k]):
+                counts[k*stride + c] = 0.0
+
+        cdef double* child_counts
+        for i in range(node.n_children):
+            self.calibrate_class_distribution( node.children[i] )
+            child_counts = value + node.children[i] * value_stride
+
+            for k in range(n_outputs):
+                for c in range(n_classes[k]):
+                    counts[k*stride + c] += child_counts[k*stride + c] 
+
+        
+    cdef double n_errors(self, double* counts, double noise_n_node_samples):
+
+        cdef SIZE_t n_outputs = self.data.n_outputs
+        cdef SIZE_t* n_classes = self.data.n_classes
+        cdef SIZE_t stride = self.data.max_n_classes
+        
+        cdef SIZE_t k, c
+        cdef double total = 0.0
+        cdef double max
+
+        for k in range(n_outputs):
+            max = counts[0]
+            for c in range(n_classes[k]):
+                if counts[c] > max:
+                    max = counts[c]
+            error = noise_n_node_samples - max 
+            total += error
+            counts += stride
+
+        total /= n_outputs
+        return total if total > 0.0 else 0.0
+
+    cdef double leaf_error(self, SIZE_t node_id, double CF):
+      
+        cdef Node* node = &self.nodes[node_id]
+         
+        cdef double noise_n_node_samples = node.noise_n_node_samples
+        if noise_n_node_samples <= 0.0: # XXX
+            return 0.0 
+
+        cdef double* counts = self.value + node_id * self.value_stride
+        cdef double error = self.n_errors( counts, noise_n_node_samples)
+
+        return error + add_errs( noise_n_node_samples, error, CF)
+
+    cdef double node_error(self, SIZE_t node_id, double CF):
+       
+        cdef Node* node = &self.nodes[node_id]
+        if node.is_leaf:
+            return self.leaf_error(node_id, CF)
+
+        cdef double noise_n_node_samples = node.noise_n_node_samples
+        if noise_n_node_samples <= 0.0: # XXX
+            return 0.0
+
+        cdef double errors = 0.0
+        for i in range(node.n_children):
+            errors += self.node_error(node.children[i], CF)
+        return errors
+
+    cdef void prune(self, SIZE_t node_id, double CF):
+
+        cdef Node* node = &self.nodes[node_id]
+
+        if not node.is_leaf:
+            for i in range(node.n_children):
+                self.prune(node.children[i], CF)
+        else:
+            return
+
+        # error if it's a leaf
+        cdef double leaf_error = self.leaf_error(node_id, CF)
+        # error if it's a inner node
+        cdef double inner_error = self.node_error(node_id, CF)
+        cdef bint debug = 1
+        if debug:
+            printf("Node[%d] leaf_err %f, inner_err %f\t", node_id, leaf_error, inner_error)
+        if leaf_error <= inner_error + 0.1:
+            if debug:
+                printf("prune this node\n")
+            # make it as leaf node
+            node.is_leaf = True
+            node.n_children = 0
+            node.feature = -1
+            node.threshold = -INFINITY
+            free(node.children)
+            node.children = NULL
+        else:
+            if debug:
+                printf("unprunning this node\n")
+
+    cdef void print_tree(self ):
+       
+        cdef Node* nodes = self.nodes
+        cdef Node* node = &nodes[0]
+        cdef SIZE_t i = 0
+        printf("root node childrens: %d\n", node.n_children)
+        for i in range(node.n_children):
+            self.print_node( node.children[i], node.feature, i, 0)
+
+    cdef void print_node(self, SIZE_t node_id, SIZE_t feature, SIZE_t index, SIZE_t depth):
+    
+        cdef Node* node = &self.nodes[node_id]
+        cdef SIZE_t i
+        
+        for i in range(depth):
+            printf(" | ")
+        printf("n=[%6.1f] f[%2d]=[%2d]  ", node.noise_n_node_samples, feature, index)
+        
+        cdef SIZE_t n_outputs = self.data.n_outputs
+        cdef SIZE_t* n_classes = self.data.n_classes
+        cdef SIZE_t stride = self.data.max_n_classes
+        cdef double* counts = self.value + node_id*self.value_stride
+
+        for k in range(n_outputs):
+            for c in range(n_classes[k]):
+                printf("%4.1f\t", counts[c])
+            counts += stride
+
+        cdef double CF = 0.25 
+        cdef double le = self.leaf_error(node_id, CF)
+        cdef double ne = self.node_error(node_id, CF)
+        cdef char op
+        if le <= ne + 0.1:
+            op = '<'
+        else:
+            op = '>'
+
+        if not node.is_leaf:
+            printf("%.2f %c %.2f", le, op, ne)
+        else:
+            printf("%.2f", le)
+
+        printf("\n")
+
+
+        if not node.is_leaf:
+            for i in range(node.n_children):
+                self.print_node( node.children[i], node.feature, i, depth+1)
+
+      
+
+
 # =========================================================================
 # Utils
 # ========================================================================
@@ -1887,6 +2139,8 @@ cdef void noise_distribution(DOUBLE_t epsilon, DOUBLE_t* dest, Data* data, UINT3
 cdef void normalize(double* dist, SIZE_t size):
 
     cdef double total = 0.0
+    
+    
     cdef SIZE_t i = 0
     for i in range(size):
         if dist[i] < 0.0:
@@ -1944,73 +2198,99 @@ correct_count[2] = 0
 
 cdef SIZE_t draw_from_exponential_mech( SplitRecord* records, int size, double sensitivity, double epsilon, UINT32_t* rand) except -1: #nogil
 
-    cdef bint debug = 1
+    cdef bint debug = 0
 
     cdef double* improvements
-    cdef double* improvements_minusmax
-    cdef double* normalized_improvements
+    #cdef double* improvements_minusmax
+    #cdef double* normalized_improvements
     cdef double max_improvement = -INFINITY
     cdef int best_i
-    cdef int i
-    cdef int ret_idx
-    cdef int j
+    cdef int ret_idx = 0
 
-    epsilon = 4.0 #XXX
+    cdef int i = 0
+    cdef int j = 0
+
+    #epsilon = 4.0 #XXX
     if debug:
         printf("draw_from_exponential_mech: e=%f s=%f n=%d\n", epsilon, sensitivity, size)
 
     improvements = <double*>calloc(size, sizeof(double))
-    improvements_minusmax = <double*>calloc(size,sizeof(double))
-    normalized_improvements = <double*>calloc(size,sizeof(double))
+    #improvements_minusmax = <double*>calloc(size,sizeof(double))
+    #normalized_improvements = <double*>calloc(size,sizeof(double))
     
     i = 0
     for i in range(size):
         improvements[i] = records[i].improvement
-        normalized_improvements[i] = records[i].improvement
+    #    normalized_improvements[i] = records[i].improvement
         if improvements[i] > max_improvement:
             max_improvement = improvements[i]
             best_i = i
 
-    normalize(normalized_improvements, size)
+    #normalize(normalized_improvements, size)
     # rescale from 0 to 1
     i = 0
     for i in range(size):
         if debug:
-            printf("%2d: f[%2d] %f\t",i, records[i].feature_index, improvements[i])
+            printf("%2d: f[%2d] %.2f\t",i, records[i].feature_index, improvements[i])
 
-        improvements_minusmax[i] = improvements[i] -  max_improvement
-
+        #improvements_minusmax[i] = improvements[i] -  max_improvement
+        improvements[i] = improvements[i] -  max_improvement
         improvements[i] = exp(improvements[i]*epsilon/(2*sensitivity))
         if debug:
-            printf("%f\t%f\t", improvements[i], improvements_minusmax[i])
+            printf("%.2f\t", improvements[i])
+            #printf("%f\t", improvements_minusmax[i])
+    
+            printf("\n")
 
-        improvements_minusmax[i] = exp(improvements_minusmax[i]*epsilon/(2*sensitivity))
-        if debug:
-            printf("%f\t" ,improvements_minusmax[i])
+        #improvements_minusmax[i] = exp(improvements_minusmax[i]*epsilon/(2*sensitivity))
+        #if debug:
+        #    printf("%f\t" ,improvements_minusmax[i])
 
-        if debug:
-            printf("%f\t", normalized_improvements[i])
+        #if debug:
+        #    printf("%f\n", normalized_improvements[i])
         # normalized_improvements[i] = exp(normalized_improvements[i]*epsilon/(2*sensitivity))
         #if debug:
         #    printf("%f\n", normalized_improvements[i])
     ret_idx = draw_from_distribution(improvements, size, rand)
-    i = draw_from_distribution(improvements_minusmax, size, rand)
-    j = draw_from_distribution(normalized_improvements,size,rand)
+    #i = draw_from_distribution(improvements_minusmax, size, rand)
+    #j = draw_from_distribution(normalized_improvements,size,rand)
     
 
+    correct_count[0] += 1
     if ret_idx == best_i:
-        correct_count[0] += 1
-    if i == best_i:
         correct_count[1] += 1
-    if j == best_i:
-        correct_count[2] += 1
+    #if i == best_i:
+    #    correct_count[1] += 1
+    #if j == best_i:
+    #    correct_count[2] += 1
     if debug:
-        printf("selected best %d,   %d %d %d \n", best_i, ret_idx, i, j) 
+        printf("selected best %d,   %d \n", best_i, ret_idx ) 
         printf("correct %d : %d : %d\n", correct_count[0], correct_count[1], correct_count[2] )
+        printf("\n")
     free(improvements)
-    return j
+    return i
 
+# for pruning
+cdef double add_errs(double N, double e, double CF):
 
+    cdef double base
+    if e < 1.0:
+        base = N*(1- pow(CF, 1.0/N))
+        
+        if e == 0.0:
+            return base
+        return base + e * ( add_errs( N, 1.0, CF) - base )
+
+    if e + 0.5 >= N:
+        return N-e if N-e > 0.0 else 0.0
+
+    cdef double z = norm.ppf( 1-CF )
+    cdef double f = (e + 0.5) / N
+    cdef double r = ( f + (z * z) / (2 * N) + z * sqrt((f / N) - (f * f / N) + (z * z / (4 * N * N)))
+                    )/ (1 + (z * z) / N)
+
+    return (r * N) - e;
+ 
 # ===============================================================
 # For test
 # ==============================================================
