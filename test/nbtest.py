@@ -8,27 +8,29 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import NBTreeClassifier
 from sklearn.cross_validation import cross_val_score
 
-def test(dataset="adult.arff", 
+def test(dataset="adult_nomissing.arff", 
         discretize = True, 
         max_depth = 5, 
         diffprivacy_mech = "no", 
         budget=-1.0, 
         criterion="entropy", 
         min_samples_leaf=0, 
-        print_tree = False,
-        is_prune = True):
+        print_tree = True,
+        is_prune = True,
+        debug = False):
     
     filename = os.getenv("HOME")+"/diffprivacy/dataset/"+dataset
 
-    print "Building Tree for ", dataset
-    print "discretize\t\t", discretize
-    print "max_depth\t\t", max_depth
-    print "min_samples_leaf\t", min_samples_leaf
+    print "# ==================================="
+    print "dataset\t ", dataset
     print "diffprivacy\t\t", diffprivacy_mech
     print "budget\t\t\t", budget
+    print "discretize\t\t", discretize
+    print "max_depth\t\t", max_depth
     print "criterion\t\t", criterion
     print "print_tree\t\t", print_tree
     print "is prune\t\t", is_prune
+    print "debug\t\t", debug
 
     data, meta = loadarff(filename) 
     data_dict = [dict(zip(data.dtype.names, record)) for record in data] 
@@ -48,11 +50,13 @@ def test(dataset="adult.arff",
                 min_samples_leaf=min_samples_leaf,
                 is_prune = is_prune)
     # nbtree = nbtree.fit(X,y,meta)
-    output =  cross_val_score(nbtree, X, y, cv=10, fit_params={'meta':meta, 'debug':False})
+    output =  cross_val_score(nbtree, X, y, cv=10, fit_params={'meta':meta, 'debug':debug})
 
     print output
     print "Average Accuracy:", np.average(output)
-    
+    print "# =========================================" 
+    print "\n"
+
     return np.average(output)
 
 
@@ -117,9 +121,12 @@ def test_lap_entropy():
 
 def test_exp_gini():
     diffprivacy_mech = "exp"
+    budgets = [ 1.0, 3.0, 5.0, 8.0, 10.0, 20.0, 50.0, 100.0]
     criterion = "gini"
-    max_depth = 5
-    budgets = [0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 8.0, 10.0, 20.0, 50.0, 100.0]
+    max_depth = 10
+    min_samples_leaf = 2
+    discretize = False
+    debug = False
 
     accuracys = []
     print "Test Case: Exponential mech, Criterion: gini"
@@ -127,7 +134,8 @@ def test_exp_gini():
         ret = test(max_depth = max_depth, 
                     diffprivacy_mech = diffprivacy_mech, 
                     budget = i,
-                    criterion = criterion)
+                    criterion = criterion,
+                    discretize = discretize)
         accuracys.append(ret)
 
     for i in range(len(budgets)):
@@ -135,30 +143,60 @@ def test_exp_gini():
 
 
 def test_one_exp_gini():
-    diffprivacy_mech = "exp"
+    diffprivacy_mech = "no"
+    budget =  -1.0
     criterion = "gini"
     max_depth = 10
-    budget =  5.0 
+    min_samples_leaf = 2
+    discretize = False
+    debug = False
+    print_tree = True
+    
+    accuracy = 0 
+    print "Test Case: Exponential mech, Criterion: gini"
+    ret = test(max_depth = max_depth, 
+            min_samples_leaf = min_samples_leaf,
+            diffprivacy_mech = diffprivacy_mech, 
+            budget = budget,
+            criterion = criterion,
+            discretize = discretize,
+            debug = debug,
+            print_tree = print_tree)
+    accuracy = ret
+
+    print "budget{0}   {1}".format( budget, accuracy)
+
+
+def test_nodiscrete_nodp_gini():
+
+    diffprivacy_mech = "no"
+    budget = -1.0
+    criterion = "gini"
+    max_depth = 10
+    
+    discretize = False
 
     accuracy = 0 
     print "Test Case: Exponential mech, Criterion: gini"
     ret = test(max_depth = max_depth, 
             diffprivacy_mech = diffprivacy_mech, 
             budget = budget,
-            criterion = criterion)
+            criterion = criterion,
+            discretize = False)
     accuracy = ret
 
-    print "budget{0}   {1}".format( budget, accuracy)
+    print "Accuracy  {0}".format(  accuracy)
 
-
-
+def test_numeric_exp_gini():
+    pass 
 
 if __name__ == "__main__":
     # test_nodp_entropy()
     #test_nodp_gini()
 #    test_lap_entropy()
-#    test_exp_gini()
-    #test_one_exp_gini()
-    debug_zero_nodp_gini()
+   # test_exp_gini()
+    test_one_exp_gini()
+    #debug_zero_nodp_gini()
+    #test_nodiscrete_nodp_gini()
     #test()
 

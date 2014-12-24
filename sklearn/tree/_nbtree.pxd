@@ -97,6 +97,8 @@ cdef class Criterion:
     cdef object random_state             # Random state
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
 
+    cdef bint debug
+
     # Methods
     cdef void init(self,
                    Data* data,
@@ -196,7 +198,7 @@ cdef class NBTreeBuilder:
     cdef bint is_prune
     cdef double CF
 
-    cpdef build(self, Tree tree, DataObject dataobject, int debug)
+    cpdef build(self, Tree tree, DataObject dataobject, bint debug)
 
 # ==================================================================
 # Tree structure

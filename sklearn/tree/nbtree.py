@@ -152,13 +152,17 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         budget = self.budget
         max_candid_features = self.max_candid_features 
 
-        criterion = CRITERIA_CLF[self.criterion](dataobject, random_state)
+        criterion = CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
 
-        splitter = SPLITTERS[ diffprivacy_mech ](criterion, max_candid_features, random_state)  
+        splitter = SPLITTERS[ diffprivacy_mech ](criterion, max_candid_features, random_state, debug)
 
-        tree = Tree(dataobject)
+        tree = Tree(dataobject, debug)
         self._tree = tree
 
+
+        print "# ====================================="
+        print "# Begin to build tree"
+        print "# b=%f, d=%d, prune=%s, CF=%f".format(budget, max_depth, self.is_prune, self.CF)
         builder = NBTreeBuilder(diffprivacy_mech,
                               budget,
                               splitter,
@@ -176,6 +180,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         builder.build( tree, dataobject, debug)
         # print "Finished to build the tree"
         
+        print "# ====================================="
+
         self.data = dataobject 
         if self.data.n_outputs == 1:
             self.data.n_classes = self.data.n_classes[0]
@@ -198,7 +204,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
-        debug = True
+        debug = False
         if debug:
             print "get into predict"
         
