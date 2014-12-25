@@ -823,7 +823,7 @@ cdef class Splitter:
         cdef SIZE_t* n_subnodes_samples
         cdef DOUBLE_t* wn_subnodes_samples
 
-        cdef bint debug = 1
+        cdef bint debug = 0
 
         # only for laplace mech
         cdef DOUBLE_t epsilon_per_feature = epsilon / n_node_features

@@ -30,7 +30,7 @@ def test(dataset="adult_nomissing.arff",
     print "criterion\t\t", criterion
     print "print_tree\t\t", print_tree
     print "is prune\t\t", is_prune
-    print "debug\t\t", debug
+    print "debug\t\t\t", debug
 
     data, meta = loadarff(filename) 
     data_dict = [dict(zip(data.dtype.names, record)) for record in data] 
@@ -49,8 +49,9 @@ def test(dataset="adult_nomissing.arff",
                 print_tree=print_tree, 
                 min_samples_leaf=min_samples_leaf,
                 is_prune = is_prune)
+
     # nbtree = nbtree.fit(X,y,meta)
-    output =  cross_val_score(nbtree, X, y, cv=10, fit_params={'meta':meta, 'debug':debug})
+    output =  cross_val_score(nbtree, X, y, cv=4, fit_params={'meta':meta, 'debug':debug})
 
     print output
     print "Average Accuracy:", np.average(output)
@@ -75,19 +76,23 @@ def test_nodp_entropy():
         print "max_depth[{0}]   {1}".format(i, accuracy[i-1])
 
 
-def test_nodp_gini():
-    
-    diffprivacy_mech = "no"
-    criterion = "gini"
-
+def test_nominal_nodp_gini():
+     
+    depth = [1,3,5,7,9]
     accuracy = []
     print "Test Case: No diffprivacy, Criterion: gini"
-    for i in range(1,11):
-        ret = test(max_depth = i, diffprivacy_mech = diffprivacy_mech, criterion = criterion)
+    for i in range(len(depth)):
+        ret = test(max_depth = depth[i], 
+                    discretize = True,
+                    diffprivacy_mech = "no",
+                    budget = -1.0,
+                    criterion = "gini",
+                    print_tree = True,
+                    is_prune = False)
         accuracy.append(ret)
 
-    for i in range(1,11):
-        print "max_depth[{0}]   {1}".format(i, accuracy[i-1])
+    for i in range(len(depth)):
+        print "max_depth[{0}]   {1}".format( depth[i] , accuracy[i])
 
 def debug_zero_nodp_gini():
     
@@ -187,15 +192,12 @@ def test_nodiscrete_nodp_gini():
 
     print "Accuracy  {0}".format(  accuracy)
 
-def test_numeric_exp_gini():
-    pass 
-
 if __name__ == "__main__":
     # test_nodp_entropy()
-    #test_nodp_gini()
+    test_nominal_nodp_gini()
 #    test_lap_entropy()
-   # test_exp_gini()
-    test_one_exp_gini()
+    # test_exp_gini()
+    #test_one_exp_gini()
     #debug_zero_nodp_gini()
     #test_nodiscrete_nodp_gini()
     #test()
