@@ -14,7 +14,8 @@ ctypedef np.npy_uint32 UINT32_t          # Unsigned 32 bit integer
 # Data
 # ===================================================================
 cdef struct Feature:
-
+    
+    char* name
     SIZE_t type       # continuous or discrete feature
     
     SIZE_t n_values   # the number of distinct value of the feature

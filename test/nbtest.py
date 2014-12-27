@@ -17,12 +17,14 @@ def test(dataset="adult_nomissing.arff",
         min_samples_leaf=0, 
         print_tree = True,
         is_prune = True,
-        debug = False):
+        debug = False,
+        seed = 2):
+
     
     filename = os.getenv("HOME")+"/diffprivacy/dataset/"+dataset
 
     print "# ==================================="
-    print "dataset\t ", dataset
+    print "dataset\t", dataset
     print "diffprivacy\t\t", diffprivacy_mech
     print "budget\t\t\t", budget
     print "discretize\t\t", discretize
@@ -31,6 +33,7 @@ def test(dataset="adult_nomissing.arff",
     print "print_tree\t\t", print_tree
     print "is prune\t\t", is_prune
     print "debug\t\t\t", debug
+    print "seed\t\t\t", seed
 
     data, meta = loadarff(filename) 
     data_dict = [dict(zip(data.dtype.names, record)) for record in data] 
@@ -48,10 +51,11 @@ def test(dataset="adult_nomissing.arff",
                 budget=budget, 
                 print_tree=print_tree, 
                 min_samples_leaf=min_samples_leaf,
-                is_prune = is_prune)
+                is_prune = is_prune,
+                seed = seed)
 
     # nbtree = nbtree.fit(X,y,meta)
-    output =  cross_val_score(nbtree, X, y, cv=4, fit_params={'meta':meta, 'debug':debug})
+    output =  cross_val_score(nbtree, X, y, cv=5, fit_params={'meta':meta, 'debug':debug})
 
     print output
     print "Average Accuracy:", np.average(output)
@@ -93,16 +97,6 @@ def test_nominal_nodp_gini():
 
     for i in range(len(depth)):
         print "max_depth[{0}]   {1}".format( depth[i] , accuracy[i])
-
-def debug_zero_nodp_gini():
-    
-    diffprivacy_mech = "no"
-    criterion = "gini"
-
-    ret = test(max_depth = 7, diffprivacy_mech = diffprivacy_mech, criterion = criterion)
-
-    print "max_depth[{0}]   {1}".format(10, ret)
-
 
 def test_lap_entropy():
     
@@ -148,28 +142,29 @@ def test_exp_gini():
 
 
 def test_one_exp_gini():
-    diffprivacy_mech = "no"
-    budget =  -1.0
-    criterion = "gini"
-    max_depth = 10
-    min_samples_leaf = 2
-    discretize = False
-    debug = False
-    print_tree = True
-    
+   
+    budget = 10000000.0
     accuracy = 0 
     print "Test Case: Exponential mech, Criterion: gini"
-    ret = test(max_depth = max_depth, 
-            min_samples_leaf = min_samples_leaf,
-            diffprivacy_mech = diffprivacy_mech, 
-            budget = budget,
-            criterion = criterion,
-            discretize = discretize,
-            debug = debug,
-            print_tree = print_tree)
+    ret = test( 
+            discretize = False,
+            max_depth = 2,
+            min_samples_leaf = 2,
+
+            diffprivacy_mech = "exp",
+            budget  =  budget,
+            criterion = "gini",
+
+            is_prune = True,
+
+            seed = 9,
+            print_tree = True,
+            debug = False
+            )
+
     accuracy = ret
 
-    print "budget{0}   {1}".format( budget, accuracy)
+    print "budget {0}   {1}".format( budget, accuracy)
 
 
 def test_nodiscrete_nodp_gini():
@@ -194,10 +189,10 @@ def test_nodiscrete_nodp_gini():
 
 if __name__ == "__main__":
     # test_nodp_entropy()
-    test_nominal_nodp_gini()
+    #test_nominal_nodp_gini()
 #    test_lap_entropy()
     # test_exp_gini()
-    #test_one_exp_gini()
+    test_one_exp_gini()
     #debug_zero_nodp_gini()
     #test_nodiscrete_nodp_gini()
     #test()
