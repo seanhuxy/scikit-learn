@@ -169,6 +169,8 @@ cdef class Splitter:
                          SIZE_t  diffprivacy_mech,
                          DOUBLE_t epsilon) except *
 
+    cdef SIZE_t node_max_n_feature_values(self, SIZE_t n_node_samples)
+
     cdef void node_value(self, DOUBLE_t* dest) # nogil
 
     cdef DOUBLE_t node_impurity(self) # nogil

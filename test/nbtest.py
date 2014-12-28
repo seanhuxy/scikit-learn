@@ -25,15 +25,15 @@ def test(dataset="adult_nomissing.arff",
 
     print "# ==================================="
     print "dataset\t", dataset
-    print "diffprivacy\t\t", diffprivacy_mech
-    print "budget\t\t\t", budget
-    print "discretize\t\t", discretize
-    print "max_depth\t\t", max_depth
-    print "criterion\t\t", criterion
-    print "print_tree\t\t", print_tree
-    print "is prune\t\t", is_prune
-    print "debug\t\t\t", debug
-    print "seed\t\t\t", seed
+    print "diffprivacy\t", diffprivacy_mech
+    print "budget\t\t", budget
+    print "discretize\t", discretize
+    print "max_depth\t", max_depth
+    print "criterion\t", criterion
+    print "print_tree\t", print_tree
+    print "is prune\t", is_prune
+    print "debug\t\t", debug
+    print "seed\t\t", seed
 
     data, meta = loadarff(filename) 
     data_dict = [dict(zip(data.dtype.names, record)) for record in data] 
@@ -54,7 +54,7 @@ def test(dataset="adult_nomissing.arff",
                 is_prune = is_prune,
                 seed = seed)
 
-    # nbtree = nbtree.fit(X,y,meta)
+    #nbtree = nbtree.fit(X,y,meta, debug = debug)
     output =  cross_val_score(nbtree, X, y, cv=5, fit_params={'meta':meta, 'debug':debug})
 
     print output
@@ -62,7 +62,7 @@ def test(dataset="adult_nomissing.arff",
     print "# =========================================" 
     print "\n"
 
-    return np.average(output)
+    #return np.average(output)
 
 
 def test_nodp_entropy():
@@ -147,8 +147,8 @@ def test_one_exp_gini():
     accuracy = 0 
     print "Test Case: Exponential mech, Criterion: gini"
     ret = test( 
-            discretize = False,
-            max_depth = 2,
+            discretize = True,
+            max_depth = 10,
             min_samples_leaf = 2,
 
             diffprivacy_mech = "exp",
