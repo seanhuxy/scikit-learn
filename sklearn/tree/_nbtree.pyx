@@ -1366,8 +1366,8 @@ cdef class DataObject:
                 else:
                     features[i].type = FEATURE_CONTINUOUS
                     features[i].n_values = 2
-                    features[i].max = meta.features_[i].max_
-                    features[i].min = meta.features_[i].min_
+                    features[i].max = meta.features_[i].max
+                    features[i].min = meta.features_[i].min
  
             if features[i].n_values > max_n_feature_values:
                 max_n_feature_values = features[i].n_values
