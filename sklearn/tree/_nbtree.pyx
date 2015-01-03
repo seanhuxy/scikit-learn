@@ -257,16 +257,14 @@ cdef class Criterion:
                 label_index = f_i*feature_stride + k*label_count_stride + class_label
                 
                 if label_index > feature_stride*feature.n_values:
-                    printf("data.y, %f\n", data.y[s_i*data.y_stride])
+
                     printf("data.y, %u\n", <SIZE_t>data.y[s_i*data.y_stride])
-                   
-                    printf("from %u to %u\n", start, end)
-                    for p in range(0, data.n_samples):
-                        printf("%f, ",data.y[p*data.y_stride])
-                    printf("\n") 
-                    
-                    printf("f[%u]=%u, f_stride[%u], class[%u]\n",split_record.feature_index, f_i, feature_stride, class_label)
-                    printf("label index is %u\n", label_index)
+
+                    printf("feature name %s, type %d\n", feature.name, feature.type)
+
+                    printf("f_i %d, class %d, label_index %d\n", f_i, class_label, label_index)
+                    printf("ftr n_values %d\n", feature.n_values)
+
                     exit(1) 
                 
                 label_count[label_index] += w
@@ -793,7 +791,8 @@ cdef class Splitter:
             samples_win[i] = i
 
         cdef SIZE_t total = 0
-        if 1:
+
+        if 0:
             for i in range(n_samples):
                 total += samples_win[i]
             printf("n_samples %d\n", n_samples)
@@ -902,6 +901,9 @@ cdef class Splitter:
             for f_j in range(n_node_features):
                 printf("%u, ",features_win[f_j])
             printf("\n")
+
+        if start >= end:
+            return NULL
        
         f_j = 0
         while f_j < n_node_features :
@@ -999,6 +1001,9 @@ cdef class Splitter:
                 if current.improvement > best_improvement:
                     best_improvement = current.improvement
                     best_i = f_j
+                elif best_i == -1:
+                    printf("Error: N %d, current improvement %f, best_improvement %f\n", end-start, current.improvement, best_improvement)
+                    
                 f_j += 1
         
         # if there's no any feature which can be splitted 
@@ -1355,19 +1360,19 @@ cdef class DataObject:
         cdef SIZE_t n_continuous_features = 0
 
         for i in range(n_features):
-            features[i].name = meta.features_[i].name
-            if meta.discretize:
+            features[i].name = meta.features[i].name
+            if meta.is_discretized:
                 features[i].type = FEATURE_DISCRETE
-                features[i].n_values = meta.features_[i].n_values
+                features[i].n_values = meta.features[i].n_values
             else:
-                if meta.features_[i].type == FEATURE_DISCRETE:
+                if meta.features[i].type == FEATURE_DISCRETE:
                     features[i].type = FEATURE_DISCRETE
-                    features[i].n_values = meta.features_[i].n_values
+                    features[i].n_values = meta.features[i].n_values
                 else:
                     features[i].type = FEATURE_CONTINUOUS
                     features[i].n_values = 2
-                    features[i].max = meta.features_[i].max
-                    features[i].min = meta.features_[i].min
+                    features[i].max = meta.features[i].max
+                    features[i].min = meta.features[i].min
  
             if features[i].n_values > max_n_feature_values:
                 max_n_feature_values = features[i].n_values
@@ -1588,6 +1593,7 @@ cdef class NBTreeBuilder:
                 is_leaf = (depth >= max_depth or n_node_features <= 0)
 
                 if epsilon_per_action > 0.0:
+                    
                     noise_n_node_samples = <DOUBLE_t>n_node_samples + noise(epsilon_per_action, rand) # XXX
                     if noise_n_node_samples < 0.:
                         noise_n_node_samples = 0.
@@ -1749,9 +1755,11 @@ cdef class NBTreeBuilder:
             printf("-----------------------------------------------\n")
             tree.print_tree()
 
+
+
         cdef SIZE_t* samples_win = self.splitter.samples_win
         cdef SIZE_t total = 0
-        if debug:
+        if 0:
             for i in range(data.n_samples):
                 total += samples_win[i]
             printf("n_samples %d\n", data.n_samples)
