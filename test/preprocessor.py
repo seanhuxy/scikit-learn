@@ -63,14 +63,15 @@ class Feature:
                 return vector
             
 
-    def discretize(self, data, nbins, method = "cluster"):
+    def discretize(self, values, nbins, method = "cluster"):
 
         if self.type == FEATURE_DISCRET:
             return 
 
+        f = self
         if method == "cluster":
-            f.centeriods = kmeans2( values, nbins, iter=20) 
-            f.centeriods = sort(f.centeriods)
+            f.centeriods, _ = kmeans2( values, nbins, iter=20) 
+            f.centeriods = np.sort(f.centeriods)
         
         else:
             if f.max in [None, np.nan]:
@@ -83,9 +84,10 @@ class Feature:
             f.centeriods = np.zeros(nbins)
             for j in range(bins):
                 f.centeriods[j] = (j+0.5)*interval
-        
-        return ret
 
+        f.is_discreted = True
+        f.n_values = len(f.centeriods)
+        
     def __str__(self):
         ''' 
         continuous:
@@ -262,6 +264,8 @@ class Preprocessor:
 
             values = np.take(data, i, axis = 1)
             f.discretize( values, nbins, method)
+            data[:,i] = f.transfer( values )
+
 
         self.is_discretized = True
         return self

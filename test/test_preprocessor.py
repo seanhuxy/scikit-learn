@@ -1,4 +1,9 @@
 import os
+import sys
+print __file__
+
+sys.path.append(os.getcwd())
+print sys.path
 
 from preprocessor import Preprocessor
 
@@ -18,6 +23,7 @@ data_out = "test/data.out"
 preprocessor = Preprocessor()
 
 preprocessor.load( feature_in, data_in)
+preprocessor.discretize(nbins=10)
 preprocessor.export( feature_out, data_out)
 
 X = preprocessor.get_X()
