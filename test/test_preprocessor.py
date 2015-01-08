@@ -1,42 +1,37 @@
 import os
 import sys
-print __file__
+import numpy as np
 
-sys.path.append(os.getcwd())
-print sys.path
+#abspath = os.path.abspath(__file__)
 
-from preprocessor import Preprocessor
+cwd = os.getcwd()
+sys.path.append(cwd)
 
 import sklearn
 from sklearn.tree import NBTreeClassifier
 from sklearn.cross_validation import cross_val_score
 
-import numpy as np
+from preprocessor import Preprocessor
 
-feature_in = os.getenv("HOME")+"/diffprivacy/dataset/adult_nomissing.arff"
-#feature_in = "test/feature.in"
-data_in = "test/data.in"
 
-feature_out = "test/feature.out"
-data_out = "test/data.out"
+def cross_val():
 
-preprocessor = Preprocessor()
+    output =  cross_val_score(nbtree, X, y, cv=5, fit_params={'meta':meta, 'debug':debug})
 
-preprocessor.load( feature_in, data_in)
-preprocessor.discretize(nbins=10)
-preprocessor.export( feature_out, data_out)
+    print output
+    print "Average Accuracy:", np.average(output)
+    print "# =========================================" 
+    print "\n"
 
-X = preprocessor.get_X()
-y = preprocessor.get_y()
+def nbtree_test(
+        X, y, 
+        X_test, y_test,
+        meta,
 
-print X
-print y
-
-def test(X, y, meta,
         discretize = False,
         max_depth = 10,
         diffprivacy_mech = "exp",
-        budget =100000.0, 
+        budget =10., 
         criterion="gini", 
         min_samples_leaf=0, 
         print_tree = True,
@@ -65,13 +60,80 @@ def test(X, y, meta,
                 is_prune = is_prune,
                 seed = seed)
 
-    #nbtree = nbtree.fit(X,y,meta, debug = debug)
-    output =  cross_val_score(nbtree, X, y, cv=5, fit_params={'meta':meta, 'debug':debug})
+    nbtree = nbtree.fit(X,y,meta, debug = debug)
 
-    print output
-    print "Average Accuracy:", np.average(output)
-    print "# =========================================" 
-    print "\n"
+    y_pred = nbtree.predict( X_test )
+
+    from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+    score  = accuracy_score(y_test, y_pred)
+    matrix = confusion_matrix(y_test, y_pred) 
+    report = classification_report(y_test, y_pred)
+
+    print "Accuracy:", score
+    print "Matrix:" 
+    print matrix
+
+    print "Report:"
+    print report
+
+    import matplotlib.pyplot as plt
+    # Show confusion matrix in a separate window
+    plt.matshow(matrix)
+    plt.title('Confusion matrix')
+    plt.colorbar()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.show()
 
 
-test(X, y, preprocessor)
+
+def preprocess():
+    is_load_from_raw = True
+
+    #feature_in     = os.path.join(cwd, "dataset/adult_nomissing.arff")
+    #feature_in    = os.path.join(cwd, "dataset/feature.in")
+    feature_in    = os.path.join(cwd, "dataset/adult.feature")
+
+
+    feature_out    = os.path.join(cwd, "dataset/adult.feature.out")
+
+    train_data_in  = os.path.join(cwd, "dataset/adult_nomissing.data")
+    train_data_out = os.path.join(cwd, "dataset/adult.data.out")
+
+    test_data_in   = os.path.join(cwd, "dataset/adult_nomissing.test")
+    test_data_out  = os.path.join(cwd, "dataset/adult.test.out")
+
+    preprocessor = Preprocessor()
+    if is_load_from_raw:
+        preprocessor.load( feature_in, train_data_in, test_data_in, sep=" ")
+        #preprocessor.discretize(nbins=10)
+        preprocessor.export( feature_out, train_data_out, test_data_out)
+
+    else:
+        preprocessor.load_existed(feature_out, train_data_out, test_data_out)
+
+        #for f in preprocessor.features:
+        #    print f
+        print "Preprocess data"
+        print preprocessor.data.dtype
+        print preprocessor.data
+        #print preprocessor.get_train()
+        #print preprocessor.get_test()
+
+    print "end preprocess" 
+    return preprocessor
+
+if __name__ == "__main__":
+
+    preprocessor = preprocess()
+
+    train = preprocessor.get_train()
+    test  = preprocessor.get_test()
+
+    X,      y      = train[:,:-1], train[:,-1]
+    X_test, y_test = test[:,:-1], test[:,-1]
+
+    nbtree_test(X, y, X_test, y_test, preprocessor)
+
+

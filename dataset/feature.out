@@ -1,0 +1,15 @@
+age discret discretized 10 21.0280514505 27.0268432979 31.5114826753 35.0129321721 38.4687565748 41.9674821002 45.9097819564 51.7323242382 59.7256637168 71.740327381 
+workclass discret 8 Private Self-emp-not-inc Self-emp-inc Federal-gov Local-gov State-gov Without-pay Never-worked 
+fnlwgt discret discretized 10 39553.3417123 78717.7818866 112887.087714 148607.913908 181935.822511 216317.679507 266455.865958 336105.433217 435968.818376 690337.48 
+education discret 16 Bachelors Some-college 11th HS-grad Prof-school Assoc-acdm Assoc-voc 9th 7th-8th 12th Masters 1st-4th 10th Doctorate 5th-6th Preschool 
+education-num discret discretized 10 3.80686886708 6.56966924701 7.66077350935 8.0 9.0 9.78743752998 10.0 10.3730232136 11.4347951529 13.5008323841 
+marital-status discret 7 Married-civ-spouse Divorced Never-married Separated Widowed Married-spouse-absent Married-AF-spouse 
+occupation discret 14 Tech-support Craft-repair Other-service Sales Exec-managerial Prof-specialty Handlers-cleaners Machine-op-inspct Adm-clerical Farming-fishing Transport-moving Priv-house-serv Protective-serv Armed-Forces 
+relationship discret 6 Wife Own-child Husband Not-in-family Other-relative Unmarried 
+race discret 5 White Asian-Pac-Islander Amer-Indian-Eskimo Other Black 
+sex discret 2 Female Male 
+capital-gain discret discretized 10 -16282.0794337 -8069.59117003 -4479.48925552 -4185.63208251 4.73268611525 3686.18405703 7388.81557847 9645.35353535 16554.4679739 99999.0 
+capital-loss discret discretized 10 -584.918988648 -509.471137693 -145.441586697 0.0 26.3444070993 203.333333333 339.0 840.195652174 1611.1119403 2043.28186969 
+hours-per-week discret discretized 10 15.6471404775 24.5574755823 30.2498740554 35.0652968037 37.7426390403 39.9997206184 42.9704491726 45.1035218783 50.8739035088 66.2638586957 
+native-country discret 41 United-States Cambodia England Puerto-Rico Canada Germany Outlying-US(Guam-USVI-etc) India Japan Greece South China Cuba Iran Honduras Philippines Italy Poland Jamaica Vietnam Mexico Portugal Ireland France Dominican-Republic Laos Ecuador Taiwan Haiti Columbia Hungary Guatemala Nicaragua Scotland Thailand Yugoslavia El-Salvador Trinadad&Tobago Peru Hong Holand-Netherlands 
+class discret 2 >50K <=50K 

@@ -1,0 +1,15 @@
+age continuous 17 90
+workclass discret 7 State-gov Self-emp-not-inc Private Federal-gov Local-gov Self-emp-inc Without-pay 
+fnlwgt continuous 13492 1490400
+education discret 16 Bachelors HS-grad 11th Masters 9th Some-college Assoc-acdm 7th-8th Doctorate Assoc-voc Prof-school 5th-6th 10th Preschool 12th 1st-4th 
+education-num continuous 1 16
+marital-status discret 7 Never-married Married-civ-spouse Divorced Married-spouse-absent Separated Married-AF-spouse Widowed 
+occupation discret 14 Adm-clerical Exec-managerial Handlers-cleaners Prof-specialty Other-service Sales Transport-moving Farming-fishing Machine-op-inspct Tech-support Craft-repair Protective-serv Armed-Forces Priv-house-serv 
+relationship discret 6 Not-in-family Husband Wife Own-child Unmarried Other-relative 
+race discret 5 White Black Asian-Pac-Islander Amer-Indian-Eskimo Other 
+sex discret 2 Male Female 
+capital-gain continuous 0 99999
+capital-loss continuous 0 4356
+hours-per-week continuous 1 99
+native-country discret 41 United-States Cuba Jamaica India Mexico Puerto-Rico Honduras England Canada Germany Iran Philippines Poland Columbia Cambodia Thailand Ecuador Laos Taiwan Haiti Portugal Dominican-Republic El-Salvador France Guatemala Italy China South Japan Yugoslavia Peru Outlying-US(Guam-USVI-etc) Scotland Trinadad&Tobago Greece Nicaragua Vietnam Hong Ireland Hungary Holand-Netherlands 
+class discret 2 <=50K >50K 

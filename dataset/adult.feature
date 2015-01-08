@@ -1,0 +1,15 @@
+age continuous
+workclass discret 
+fnlwgt continuous
+education discret 
+education-num continuous
+marital-status discret
+occupation discret 
+relationship discret
+race discret
+sex discret
+capital-gain continuous
+capital-loss continuous
+hours-per-week continuous
+native-country discret
+class discret
