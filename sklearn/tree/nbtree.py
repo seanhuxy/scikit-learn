@@ -242,3 +242,55 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                         axis=0)
 
                 return predictions
+
+    def predict_proba(self, X):
+        """Predict class probabilities of the input samples X.
+
+        Parameters
+        ----------
+        X : array-like of shape = [n_samples, n_features]
+            The input samples.
+
+        Returns
+        -------
+        p : array of shape = [n_samples, n_classes], or a list of n_outputs
+            such arrays if n_outputs > 1.
+            The class probabilities of the input samples. The order of the
+            classes corresponds to that in the attribute `classes_`.
+        """
+        if getattr(X, "dtype", None) != DTYPE or X.ndim != 2:
+            X = array2d(X, dtype=DTYPE)
+
+        n_samples, n_features = X.shape
+
+        if self._tree is None:
+            raise Exception("Tree not initialized. Perform a fit first.")
+
+        if self.data.n_features != n_features:
+            raise ValueError("Number of features of the model must "
+                             " match the input. Model n_features is %s and "
+                             " input n_features is %s "
+                             % (self.data.n_features, n_features))
+
+        proba = self._tree.predict(X)
+
+        if self.data.n_outputs == 1:
+            proba = proba[:, :self.data.n_classes]
+            normalizer = proba.sum(axis=1)[:, np.newaxis]
+            normalizer[normalizer == 0.0] = 1.0
+            proba /= normalizer
+
+            return proba
+
+        else:
+            all_proba = []
+
+            for k in xrange(self.data.n_outputs_):
+                proba_k = proba[:, k, :self.data.n_classes_[k]]
+                normalizer = proba_k.sum(axis=1)[:, np.newaxis]
+                normalizer[normalizer == 0.0] = 1.0
+                proba_k /= normalizer
+                all_proba.append(proba_k)
+
+            return all_proba
+

@@ -67,6 +67,7 @@ class Feature:
         if method == "cluster":
             centeriods, _ = kmeans2( data, nbins, iter=20) 
             centeriods = np.sort(centeriods)
+            centeriods = np.unique(centeriods)	
         
         else:
             max = self.max
@@ -282,6 +283,7 @@ class Preprocessor:
     def export(self, feature_file, train_data_file, test_data_file):
         self.check_load()
 
+        print "begin to export"
         features = self.features
         train_data = self.get_train()
         test_data  = self.get_test()
@@ -307,8 +309,10 @@ class Preprocessor:
         _export_data( train_data_file, train_data)
         _export_data( test_data_file,  test_data)
 
-        _export_data( train_data_file+".origin", self.origin_train)
-        _export_data( test_data_file+".origin", self.origin_test)
+        print "finished export"
+
+        #_export_data( train_data_file+".origin", self.origin_train)
+        #_export_data( test_data_file+".origin", self.origin_test)
 
         return self
 
@@ -408,7 +412,7 @@ class Preprocessor:
         d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
     
         data = np.array(d)
-        print data[0]
+        #print data
 
         def remove_missing( array ):
 
@@ -438,13 +442,6 @@ class Preprocessor:
         train_data = self._load_data(features, train_data_file, sep=sep )
         test_data  = self._load_data(features, test_data_file, sep=sep )
 
-        def remove_col(data, col):
-            data = np.delete( data, col, axis=1)
-            return data
-
-        #remove_col( train_data, 0)
-        #remove_col( test_data, 0)
-
         n_train_samples = train_data.shape[0]
         n_test_samples  = test_data.shape[0]
         n_features = train_data.shape[1]
@@ -458,7 +455,13 @@ class Preprocessor:
             data[:,i] = new_cols
 
         data = data.astype(float)
-       
+        def remove_col(data, col):
+            data = np.delete( data, col, axis=1)
+            return data
+
+        #data = remove_col( data, 0)
+        #del features[0]
+
         self.origin_train = train_data
         self.origin_test  = test_data
 
@@ -480,7 +483,7 @@ class Preprocessor:
         train_data = self._load_data(features, train_data_file )
         test_data  = self._load_data(features, test_data_file )
 
-        print train_data
+        #print train_data
 
         n_train_samples = train_data.shape[0]
         n_test_samples  = test_data.shape[0]
