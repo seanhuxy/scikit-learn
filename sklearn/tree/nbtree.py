@@ -294,3 +294,23 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
 
             return all_proba
 
+    @property
+    def feature_importances(self):
+        """Return the feature importances.
+
+        The importance of a feature is computed as the (normalized) total
+        reduction of the criterion brought by that feature.
+        It is also known as the Gini importance.
+
+        Returns
+        -------
+        feature_importances_ : array, shape = [n_features]
+        """
+        if self._tree is None:
+            raise ValueError("Estimator not fitted, "
+                             "call `fit` before `feature_importances_`.")
+
+        return self._tree.compute_feature_importances()
+
+
+

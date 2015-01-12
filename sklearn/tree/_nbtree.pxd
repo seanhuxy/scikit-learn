@@ -216,6 +216,7 @@ cdef struct Node:
     DOUBLE_t threshold  # (only for continuous feature) The splitting point
     
     DOUBLE_t impurity   # reserved. Impurity of the node (i.e., the value of the criterion)
+    DOUBLE_t improvement
     
     SIZE_t* children    # an array, storing ids of the children of this node
     SIZE_t  n_children  # size = feature.n_values
@@ -260,6 +261,7 @@ cdef class Tree:
                 SIZE_t feature,
                 DOUBLE_t threshold,
                 SIZE_t n_children,
+                DOUBLE_t importance,
                 SIZE_t n_node_samples,
                 DOUBLE_t weighted_n_node_samples,
                 DOUBLE_t noise_n_node_samples
@@ -277,6 +279,9 @@ cdef class Tree:
     cdef double leaf_error(self, SIZE_t node_id, double CF)
     cdef double node_error(slef, SIZE_t node_id, double CF)
     cdef void prune(self, SIZE_t node_id, double CF)
+
+    cdef void compute_node_feature_importance(self, SIZE_t node_id, np.ndarray importances)
+    cpdef np.ndarray compute_feature_importances(self, normalize=*)
 
     cdef void print_tree(self)
     cdef void print_node(self, SIZE_t node_id, SIZE_t feature, SIZE_t index, SIZE_t depth)

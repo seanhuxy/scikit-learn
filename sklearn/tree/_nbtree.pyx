@@ -1636,6 +1636,7 @@ cdef class NBTreeBuilder:
                             NO_FEATURE,
                             NO_THRESHOLD,
                             0,                      # no children
+                            0,                      # improvement = 0
                             n_node_samples,
                             weighted_n_node_samples, # xxx
                             noise_n_node_samples
@@ -1667,6 +1668,7 @@ cdef class NBTreeBuilder:
                             split_record.feature_index,
                             split_record.threshold,
                             split_record.n_subnodes,  # number of children
+                            split_record.improvement, # improvement
                             n_node_samples, 
                             weighted_n_node_samples, # XXX
                             noise_n_node_samples
@@ -1894,6 +1896,7 @@ cdef class Tree:
                           SIZE_t feature, 
                           DOUBLE_t threshold, 
                           SIZE_t n_children,
+                          DOUBLE_t improvement,
                           SIZE_t n_node_samples, 
                           DOUBLE_t weighted_n_node_samples,
                           DOUBLE_t noise_n_node_samples
@@ -1920,6 +1923,7 @@ cdef class Tree:
         node.feature = feature
         node.threshold = threshold
         # node.impurity = impurity
+        node.improvement = improvement
         
         node.n_children = n_children 
         if is_leaf and n_children == 0:
@@ -2218,6 +2222,42 @@ cdef class Tree:
         else:
             if debug:
                 printf("N[%d] %f > %f +0.1\t unprune\n", node_id, leaf_error, inner_error)
+
+
+    cdef void compute_node_feature_importance(self, SIZE_t node_id, np.ndarray importances):
+
+        cdef Node* node = &self.nodes[node_id]
+
+        # for child node
+        for i in range(node.n_children):
+            child_id = node.children[i]
+            self.compute_node_feature_importance(child_id, importances)
+
+        # for this node
+        importance = node.improvement
+        importances[ node.feature ] += importance
+
+    cpdef np.ndarray compute_feature_importances(self, normalize=True):
+        """Computes the importance of each feature (aka variable)."""
+        cdef Node* nodes = self.nodes
+        cdef Node* node = nodes
+
+        cdef np.ndarray[np.float64_t, ndim=1] importances
+        importances = np.zeros((self.n_features,))
+
+        self.compute_node_feature_importance(0, importances)
+
+        importances = importances / nodes[0].weighted_n_node_samples
+
+        cdef double normalizer
+        if normalize:
+            normalizer = np.sum(importances)
+
+            if normalizer > 0.0:
+                # Avoid dividing by zero (e.g., when root is pure)
+                importances /= normalizer
+
+        return importances
 
     cdef void print_tree(self ):
        

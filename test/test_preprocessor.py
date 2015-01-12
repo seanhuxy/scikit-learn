@@ -78,6 +78,15 @@ def nbtree_test(
     print "Report:"
     print report
 
+    print "Feature Importance:"
+    print "index\tfeature\tscore"
+    feature_importances = nbtree.feature_importances
+    
+    features = np.argsort(feature_importances)
+    for i, f in enumerate(features):
+        print "[%d] %s %.3f"%(i, meta.features[f].name, feature_importances[f])
+    print "\n"
+    
     # sort 
     sorted_indices = np.argsort(- y_prob)
     sorted_y_true = y_true[sorted_indices]
@@ -85,9 +94,9 @@ def nbtree_test(
     sorted_y_prob = y_prob[sorted_indices]
 
     fpr, tpr, threshs = metrics.roc_curve(y_true, y_prob, pos_label=1) 
-    print "thresh\tFPR\tTPR\t"
-    for i, thresh in enumerate(threshs):
-        print "%.2f\t%.2f\t%.2f"%(thresh, fpr[i], tpr[i])
+#    print "thresh\tFPR\tTPR\t"
+#    for i, thresh in enumerate(threshs):
+#        print "%.2f\t%.2f\t%.2f"%(thresh, fpr[i], tpr[i])
 
     from matplotlib import pyplot as plt 
 
