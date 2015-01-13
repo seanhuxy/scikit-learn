@@ -127,10 +127,10 @@ def nbtree_test(
             print_tree=print_tree,
             debug=debug)
 
-    rf.fit( X, y )
+    #rf.fit( X, y )
 
-    #nbtree = nbtree.fit(X,y, meta, debug = debug)
-    clf = rf
+    nbtree = nbtree.fit(X, y )
+    clf = nbtree
 
     y_true = y_test
     y_prob = clf.predict_proba(X_test)[:,1]

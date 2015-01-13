@@ -132,6 +132,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
       
         if self.meta is None:
             raise Exception("Attribute meta is None, please set it first by set_meta()")
+        meta = self.meta
 
         # random_state
         random_state = self.random_state
