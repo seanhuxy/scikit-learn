@@ -33,14 +33,17 @@ from . import _nbtree
 # Types and constants
 # =================================================================
 
-DTYPE  = _nbtree.DTYPE     # XXX
+DTYPE  = _nbtree.DTYPE  
 DOUBLE = _nbtree.DOUBLE
 
 NO_DIFF_PRIVACY_MECH  = 0
 LAP_DIFF_PRIVACY_MECH = 1
 EXP_DIFF_PRIVACY_MECH = 2
 
-CRITERIA_CLF = { "gini": _nbtree.Gini, "entropy": _nbtree.Entropy, "lapentropy": _nbtree.LapEntropy } # XXX
+CRITERIA_CLF ={ "gini"      : _nbtree.Gini, 
+                "entropy"   : _nbtree.Entropy, 
+                "lapentropy": _nbtree.LapEntropy } 
+
 SPLITTERS = { NO_DIFF_PRIVACY_MECH  : ExpSplitter, 
               LAP_DIFF_PRIVACY_MECH : LapSplitter,
               EXP_DIFF_PRIVACY_MECH : ExpSplitter }
@@ -48,8 +51,8 @@ SPLITTERS = { NO_DIFF_PRIVACY_MECH  : ExpSplitter,
 # =================================================================
 # Tree
 # =================================================================
-class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixin,
-                                          _LearntSelectorMixin)): # XXX 
+class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, 
+                                        ClassifierMixin, _LearntSelectorMixin)):
 
     def __init__(self,
                 
@@ -57,19 +60,22 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                 budget = -1.0,
                 
                 criterion = "gini",
-                seed = 1,
 
                 max_depth = 5,
                 max_candid_features = 10,
                 min_samples_leaf = 0,
 
+                CF = 0.25,
+
+                random_state = 1,
+
                 print_tree = True ,
                 is_prune = True,
-                CF = 0.25,
+                debug = False
                 ):
 
         if isinstance(diffprivacy_mech, string_types):
-            if diffprivacy_mech is "no":
+            if diffprivacy_mech in ["no", "n"]:
                 diffprivacy_mech = NO_DIFF_PRIVACY_MECH
             elif diffprivacy_mech in ["laplace", "lap", "l"]:
                 diffprivacy_mech = LAP_DIFF_PRIVACY_MECH
@@ -77,6 +83,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                 diffprivacy_mech = EXP_DIFF_PRIVACY_MECH
             else:
                 raise ValueError("diffprivacy_mech %s is illegal"%diffprivacy_mech)
+
         elif isinstance(diffprivacy_mech, (numbers.Integral, np.integer)):
             if diffprivacy_mech not in [NO_DIFF_PRIVACY_MECH, LAP_DIFF_PRIVACY_MECH, EXP_DIFF_PRIVACY_MECH]:
                 raise ValueError
@@ -84,15 +91,21 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
             raise ValueError
 
         self.diffprivacy_mech = diffprivacy_mech
+
+        if diffprivacy_mech is NO_DIFF_PRIVACY_MECH:
+            budget = -1.0
         self.budget = budget
        
         if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
             criterion = "lapentropy"
+        if criterion not in ["gini", "entropy", "lapentropy"]:
+            raise Exception("Invalid criterion %s"%criterion)
         self.criterion = criterion
         
-        self.seed = seed
-        if isinstance(seed, (numbers.Integral, np.integer)):
-            self.random_state = np.random.RandomState(seed)
+        if isinstance(random_state, (numbers.Integral, np.integer)):
+            self.random_state = np.random.RandomState(random_state)
+        elif isinstance(random_state, np.random.RandomState):
+            self.random_state = random_state
         else:
             self.random_state = np.random.RandomState()
 
@@ -104,18 +117,26 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         self.is_prune = is_prune
         self.CF = CF
 
+        self.debug = debug
+
         # inner structure
         self._tree = None
 
+    def set_meta(self, meta):
+        self.meta = meta
+
     def fit(self,
             X, y,
-            meta,
             sample_weight = None,
-            debug = False
             ):
-       
+      
+        if self.meta is None:
+            raise Exception("Attribute meta is None, please set it first by set_meta()")
+
         # random_state
         random_state = self.random_state
+
+        debug = self.debug
 
         if sample_weight is not None:
             if (getattr(sample_weight, "dtype", None) != DOUBLE or
@@ -142,23 +163,20 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         dataobject = DataObject(X, y, meta, sample_weight)
 
         # 2. check parameter
-        # XXX max depth
         max_depth = self.max_depth 
         if max_depth <= 0:
             raise ValueError("max_depth must be greater than zero.")
         
         # 3. setup budget, diffprivacy
-        diffprivacy_mech = self.diffprivacy_mech
-        budget = self.budget
+        diffprivacy_mech    = self.diffprivacy_mech
+        budget              = self.budget
         max_candid_features = self.max_candid_features 
 
         criterion = CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
-
-        splitter = SPLITTERS[ diffprivacy_mech ](criterion, max_candid_features, random_state, debug)
+        splitter  = SPLITTERS[diffprivacy_mech ](criterion, max_candid_features, random_state, debug)
 
         tree = Tree(dataobject, debug)
         self._tree = tree
-
 
         print "# ====================================="
         print "# Begin to build tree"
@@ -175,10 +193,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
                               self.CF)
 
 
-        # print "Begin to build the tree"
         # 4. build tree
         builder.build( tree, dataobject, debug)
-        # print "Finished to build the tree"
         
         print "# ====================================="
 
@@ -204,7 +220,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
-        debug = False
+        debug = self.debug
         if debug:
             print "get into predict"
         
@@ -295,7 +311,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator, ClassifierMixi
             return all_proba
 
     @property
-    def feature_importances(self):
+    def feature_importances_(self): 
+    
         """Return the feature importances.
 
         The importance of a feature is computed as the (normalized) total

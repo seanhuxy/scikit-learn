@@ -14,16 +14,14 @@ ctypedef np.npy_uint32 UINT32_t          # Unsigned 32 bit integer
 # Data
 # ===================================================================
 cdef struct Feature:
-    
     char* name
-    SIZE_t type       # continuous or discrete feature
+    SIZE_t type     # continuous or discrete feature
     
-    SIZE_t n_values   # the number of distinct value of the feature
-                        # for continuous feature, = 2  
+    SIZE_t n_values # the number of distinct value of the feature
+                    # for continuous feature, = 2  
 
-    DOUBLE_t max     # for continuous feature only
-    DOUBLE_t min     # for continuous feature only
-
+    DOUBLE_t max    # for continuous feature only
+    DOUBLE_t min    # for continuous feature only
 
 cdef struct Data:
     DTYPE_t* X
@@ -52,26 +50,11 @@ cdef struct Data:
 cdef class DataObject:
 
     cdef Data* data
-    #cdef DOUBLE_t* X
-    #cdef DOUBLE_t* y
-    #cdef DOUBLE_t* sample_weight
-    #
-    #cdef SIZE_t  X_sample_stride  
-    #cdef SIZE_t  X_feature_stride 
-    #cdef SIZE_t  y_stride 
-    #
-    #cdef SIZE_t  n_samples 
-    #cdef DOUBLE_t  weighted_n_samples 
-    #
-    #cdef Feature* features
+
     cdef public SIZE_t n_features
-    #cdef SIZE_t  max_n_feature_values # max(number of distint values of all feature)
-    #cdef SIZE_t  n_continuous_features
-    #
     cdef public SIZE_t n_outputs
     cdef public object classes
     cdef public object n_classes
-    #cdef SIZE_t  max_n_classes    # max(number of distinct class label)
 
 # =======================================================================
 # Criterion
@@ -145,12 +128,12 @@ cdef class Splitter:
     cdef SIZE_t* features_win
     cdef SIZE_t  n_features
     
-    cdef DTYPE_t* feature_values        # .temp
+    cdef DTYPE_t* feature_values    # .temp
 
-    cdef SIZE_t max_candid_features      # reserved
+    cdef SIZE_t max_candid_features # reserved
 
-    cdef object random_state             # Random state
-    cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
+    cdef object random_state        # Random state
+    cdef UINT32_t rand_r_state      # sklearn_rand_r random number state
 
     # Methods
     cdef void init(self, Data* data)
@@ -190,12 +173,12 @@ cdef class NBTreeBuilder:
     cdef SIZE_t min_samples_leaf 
 
     # inner structure
-    cdef Splitter    splitter
-    #cdef Data*        data    # X, y and metadata
-    cdef Tree        tree
+    cdef Splitter splitter
+    cdef Data*  data     # X, y and metadata
+    cdef Tree   tree
 
-    cdef object random_state             # Random state
-    cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
+    cdef object random_state    # Random state
+    cdef UINT32_t rand_r_state  # sklearn_rand_r random number state
     
     cdef bint print_tree        # if True, print the tree to stdout 
     cdef bint is_prune
@@ -220,11 +203,6 @@ cdef struct Node:
     
     SIZE_t* children    # an array, storing ids of the children of this node
     SIZE_t  n_children  # size = feature.n_values
-
-    # For leaf node
-    # DOUBLE_t* values    # (only for leaf node) Array of class distribution 
-                        #   (n_outputs, max_n_classes)
-    # SIZE_t  label       # class label, max_index(values)
 
     # reserved
     SIZE_t n_node_samples   # Number of samples at this node
@@ -271,7 +249,6 @@ cdef class Tree:
     cdef np.ndarray _get_value_ndarray(self)
     cdef np.ndarray _get_node_ndarray(self)
     cpdef np.ndarray apply(self, np.ndarray[DTYPE_t, ndim=2] X)
-    # cpdef compute_feature_importances(self, normalize=*)
 
     cdef void calibrate_n_node_samples(self, SIZE_t node_id, DOUBLE_t fixed_n_node_samples)
     cdef void calibrate_class_distribution(self, SIZE_t node_id) 

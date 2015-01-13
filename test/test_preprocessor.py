@@ -9,6 +9,7 @@ sys.path.append(cwd)
 
 import sklearn
 from sklearn.tree import NBTreeClassifier
+from sklearn.ensemble import RandomForestClassifier as RandomForest
 from sklearn.cross_validation import cross_val_score
 from sklearn import metrics
 
@@ -24,48 +25,115 @@ def cross_val():
     print "# =========================================" 
     print "\n"
 
+class DiffPrivacyRandomForestClassifier(ForestClassifier):
+
+    def __init__(self, 
+                base_estimator = NBTreeClassifier,
+                n_estimators   = 10,
+                bootstrap=True,
+                oob_score=False,
+                n_jobs=1,
+                random_state=None,
+                verbose=False,
+                # estimator params
+                diffprivacy_mech = "no",
+                budget = -1.0,
+                criterion = "gini",
+                max_depth = 10,
+                min_samples_leaf = 1,
+                is_prune = True,
+                print_tree = True,
+                debug=False,
+                ):
+
+        super( DiffPrivacyRandomForestClassifier, self).__init__(
+            base_estimator=base_estimator,
+            n_estimators=n_estimators,
+            estimator_params=("diffprivacy_mech","budget","criterion", 
+                            "max_depth", "min_samples_leaf", "is_prune",
+                            "print_tree", "debug"),
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose)
+
+        self.diffprivacy_mech=diffprivacy_mech
+        if budget > 0.0 and n_estimators > 0:
+            budget /= n_estimators
+        self.budget=budget
+
+        self.criterion = criterion
+        self.max_depth = max_depth
+        self.min_samples_leaf = min_samples_leaf
+        self.is_prune = is_prune
+        self.print_tree = True
+        self.debug = debug
+
+
 def nbtree_test(
         X, y, 
         X_test, y_test,
         meta,
 
-        discretize = False,
+        #discretize = False,
         max_depth = 10,
-        diffprivacy_mech = "exp",
-        budget =10., 
-        criterion="gini", 
+        diffprivacy_mech = "lap",
+        budget =4., 
+        criterion="entropy", 
         min_samples_leaf=0, 
         print_tree = True,
         is_prune = True,
         debug = False,
-        seed = 2):
+        random_state = 2):
 
     print "# ==================================="
     print "diffprivacy\t", diffprivacy_mech
     print "budget\t\t", budget
-    print "discretize\t", discretize
+    #print "discretize\t", discretize
     print "max_depth\t", max_depth
     print "criterion\t", criterion
     print "print_tree\t", print_tree
     print "is prune\t", is_prune
     print "debug\t\t", debug
-    print "seed\t\t", seed
+    print "random\t\t", random_state
 
     nbtree = NBTreeClassifier(
-                max_depth=max_depth, 
+                max_depth       =max_depth, 
                 diffprivacy_mech=diffprivacy_mech, 
-                criterion=criterion, 
-                budget=budget, 
-                print_tree=print_tree, 
+                criterion       =criterion, 
+                budget          =budget, 
+                print_tree      =print_tree, 
                 min_samples_leaf=min_samples_leaf,
-                is_prune = is_prune,
-                seed = seed)
+                is_prune        = is_prune,
+                random_state    = random_state)
 
-    nbtree = nbtree.fit(X,y,meta, debug = debug)
+    nbtree.set_meta(meta)
+
+    n_estimators = 10
+
+    rf = DiffPrivacyRandomForestClassifier( 
+            base_estimator=nbtree,
+            n_estimators = n_estimators,
+            n_jobs=-1,
+            
+            diffprivacy_mech=diffprivacy_mech,
+            budget=budget,
+            criterion    = criterion,
+            max_depth    = max_depth,
+            min_samples_leaf=min_samples_leaf,
+            is_prune = is_prune,
+            print_tree=print_tree,
+            debug=debug)
+
+    rf.fit( X, y )
+
+    #nbtree = nbtree.fit(X,y, meta, debug = debug)
+    clf = rf
 
     y_true = y_test
-    y_prob = nbtree.predict_proba(X_test)[:,1]
-    y_pred = nbtree.predict( X_test )
+    y_prob = clf.predict_proba(X_test)[:,1]
+    y_pred = clf.predict( X_test )
 
     score  = metrics.accuracy_score(    y_test, y_pred)
     matrix = metrics.confusion_matrix(  y_test, y_pred)
@@ -80,7 +148,7 @@ def nbtree_test(
 
     print "Feature Importance:"
     print "index\tfeature\tscore"
-    feature_importances = nbtree.feature_importances
+    feature_importances = clf.feature_importances_
     
     features = np.argsort(feature_importances)
     for i, f in enumerate(features):
@@ -98,12 +166,13 @@ def nbtree_test(
 #    for i, thresh in enumerate(threshs):
 #        print "%.2f\t%.2f\t%.2f"%(thresh, fpr[i], tpr[i])
 
-    from matplotlib import pyplot as plt 
+    if False:
+        from matplotlib import pyplot as plt 
 
-    plt.plot( fpr, tpr)
-    plt.ylabel("True Positive Rate")
-    plt.xlabel("False Positive Rate")
-    plt.show()
+        plt.plot( fpr, tpr)
+        plt.ylabel("True Positive Rate")
+        plt.xlabel("False Positive Rate")
+        plt.show()
 
     auc = metrics.roc_auc_score( y_true, y_prob)
     print "AUC:", auc
