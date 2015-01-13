@@ -1,5 +1,6 @@
 *.log
 sklearn/**/*.c
+!sklearn/utils/src/gamma.c
 *.h
 *.pyc
 *.so

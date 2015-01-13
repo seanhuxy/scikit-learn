@@ -1,15 +1,15 @@
-age discret discretized 10 19.8521369253 24.4516971279 28.5140681193 32.001333689 35.0129321721 37.9833748961 41.9408786838 47.7924821373 55.9935089021 67.9462102689 
+age discret discretized 10 19.2831155521 23.5204936095 27.030751378 30.5181743081 34.9919009052 40.4368819081 45.9097819564 51.7323242382 59.7256637168 71.740327381 
 workclass discret 7 State-gov Self-emp-not-inc Private Federal-gov Local-gov Self-emp-inc Without-pay 
-fnlwgt discret discretized 10 44543.6869723 98429.59511 133735.889626 169389.353662 199940.712912 239233.24713 290650.17926 357183.32851 460528.410256 726497.113043 
+fnlwgt discret discretized 10 37100.0406295 71128.4906367 106994.411491 139515.310738 175162.227522 210987.675388 265276.034367 339772.988409 446208.828437 715712.11245 
 education discret 16 Bachelors HS-grad 11th Masters 9th Some-college Assoc-acdm 7th-8th Doctorate Assoc-voc Prof-school 5th-6th 10th Preschool 12th 1st-4th 
-education-num discret discretized 10 3.80686886708 6.56966924701 8.0 8.68164588495 9.0 9.19718272843 10.0 10.4588343655 11.4347951529 13.5008323841 
+education-num discret discretized 10 3.80686886708 6.56966924701 8.0 9.0 10.0 10.65351728 11.0 11.1677405604 12.0 13.5008323841 
 marital-status discret 7 Never-married Married-civ-spouse Divorced Married-spouse-absent Separated Married-AF-spouse Widowed 
 occupation discret 14 Adm-clerical Exec-managerial Handlers-cleaners Prof-specialty Other-service Sales Transport-moving Farming-fishing Machine-op-inspct Tech-support Craft-repair Protective-serv Armed-Forces Priv-house-serv 
 relationship discret 6 Not-in-family Husband Wife Own-child Unmarried Other-relative 
 race discret 5 White Black Asian-Pac-Islander Amer-Indian-Eskimo Other 
 sex discret 2 Male Female 
-capital-gain discret discretized 10 -7961.96472689 -6250.73351663 -3867.60623333 -1364.21510947 2.3522418233 2748.88662132 4664.62466125 7833.67549669 16554.4679739 99999.0 
-capital-loss discret discretized 10 -419.54717291 -364.319563206 -271.454620904 -237.818802278 -200.5012982 -79.3759659701 0.0657879469984 831.234042553 1611.1119403 2043.28186969 
-hours-per-week discret discretized 10 15.7073840242 27.5335408022 34.4145695364 37.3044897959 39.0 40.0026151116 42.9704491726 45.7357541899 53.7050720906 74.9842829077 
+capital-gain discret discretized 10 -7151.73590081 -5724.00588004 -5205.337608 -1977.38609471 -1322.92008236 -849.235701931 29.160322596 5923.51917808 16529.1027308 99999.0 
+capital-loss discret discretized 10 -433.737493609 -85.1577733098 0.0 203.333333333 339.0 694.379310345 1240.51162791 1620.19278997 1936.33540925 2447.63605442 
+hours-per-week discret discretized 10 15.6471404775 24.48374613 27.8448275862 30.4075675676 35.2535037098 39.9681537161 44.811634349 47.9459459459 51.2610863758 66.2638586957 
 native-country discret 41 United-States Cuba Jamaica India Mexico Puerto-Rico Honduras England Canada Germany Iran Philippines Poland Columbia Cambodia Thailand Ecuador Laos Taiwan Haiti Portugal Dominican-Republic El-Salvador France Guatemala Italy China South Japan Yugoslavia Peru Outlying-US(Guam-USVI-etc) Scotland Trinadad&Tobago Greece Nicaragua Vietnam Hong Ireland Hungary Holand-Netherlands 
 class discret 2 <=50K >50K 

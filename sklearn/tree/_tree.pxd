@@ -27,8 +27,6 @@ cdef class Criterion:
     # impurity of a split on that node. It also computes the output statistics
     # such as the mean in regression and class probabilities in classification.
 
-    cdef UINT32_t rand_r_state
-
     # Internal structures
     cdef DOUBLE_t* y                     # Values of y
     cdef SIZE_t y_stride                 # Stride in y (since n_outputs >= 1)
@@ -50,17 +48,15 @@ cdef class Criterion:
     # statistics correspond to samples[start:pos] and samples[pos:end].
 
     # Methods
-    cdef void init(self, double epsilon_per_action,
-                   DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
+    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
                    double weighted_n_samples, SIZE_t* samples, SIZE_t start,
                    SIZE_t end) nogil
     cdef void reset(self) nogil
-    cdef void update(self, double epsilon_per_action, SIZE_t new_pos) nogil
+    cdef void update(self, SIZE_t new_pos) nogil
     cdef double node_impurity(self) nogil
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil
-    cdef void node_value(self, double epsilon_per_action, double* dest) nogil
-
+    cdef void node_value(self, double* dest) nogil
     cdef double impurity_improvement(self, double impurity) nogil
 
 
@@ -95,13 +91,11 @@ cdef class Splitter:
     cdef UINT32_t rand_r_state           # sklearn_rand_r random number state
 
     cdef SIZE_t* samples                 # Sample indices in X, y
-    cdef SIZE_t  n_samples               # X.shape[0]
-    cdef double  weighted_n_samples      # Weighted number of samples
-    
+    cdef SIZE_t n_samples                # X.shape[0]
+    cdef double weighted_n_samples       # Weighted number of samples
     cdef SIZE_t* features                # Feature indices in X
     cdef SIZE_t* constant_features       # Constant features indices
-    cdef SIZE_t  n_features              # X.shape[1]
-    
+    cdef SIZE_t n_features               # X.shape[1]
     cdef DTYPE_t* feature_values         # temp. array holding feature values
     cdef SIZE_t start                    # Start position for the current node
     cdef SIZE_t end                      # End position for the current node
@@ -132,17 +126,15 @@ cdef class Splitter:
     # Methods
     cdef void init(self, np.ndarray X, np.ndarray y, DOUBLE_t* sample_weight)
 
-    cdef void node_reset(self, double epsilon_per_action, SIZE_t start, SIZE_t end,
+    cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil
 
     cdef void node_split(self,
-                         int diffprivacy,
-                         double epsilon_per_action,
                          double impurity,   # Impurity of the node
                          SplitRecord* split,
                          SIZE_t* n_constant_features) nogil
 
-    cdef void node_value(self, double epsilon_per_action, double* dest) nogil
+    cdef void node_value(self, double* dest) nogil
 
     cdef double node_impurity(self) nogil
 
@@ -185,7 +177,7 @@ cdef class Tree:
     # Methods
     cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
                           SIZE_t feature, double threshold, double impurity,
-                          SIZE_t n_node_samples, 
+                          SIZE_t n_node_samples,
                           double weighted_n_samples) nogil
     cdef void _resize(self, SIZE_t capacity)
     cdef int _resize_c(self, SIZE_t capacity=*) nogil
@@ -216,13 +208,8 @@ cdef class TreeBuilder:
     cdef SIZE_t min_samples_leaf    # Minimum number of samples in a leaf
     cdef SIZE_t max_depth           # Maximal tree depth
 
-    cdef SIZE_t diffprivacy
-    cdef double budget
-    cdef double epsilon_per_depth
-
     cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
                 np.ndarray sample_weight=*)
 
 cdef inline void sort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil
-cdef inline SIZE_t rand_int(SIZE_t end, UINT32_t* random_state) nogil
-cdef inline double rand_double(UINT32_t* random_state) nogil
+ 

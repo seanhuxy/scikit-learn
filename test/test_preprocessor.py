@@ -10,6 +10,7 @@ sys.path.append(cwd)
 import sklearn
 from sklearn.tree import NBTreeClassifier
 from sklearn.ensemble import RandomForestClassifier as RandomForest
+from sklearn.ensemble import ForestClassifier
 from sklearn.cross_validation import cross_val_score
 from sklearn import metrics
 
