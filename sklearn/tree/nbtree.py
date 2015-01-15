@@ -180,7 +180,6 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         self._tree = tree
 
         print "# ====================================="
-        print "# Begin to build tree"
         print "# b={0}, d={1}, prune={2}, CF={3}".format(budget, max_depth, self.is_prune, self.CF)
         builder = NBTreeBuilder(diffprivacy_mech,
                               budget,

@@ -80,24 +80,24 @@ def nbtree_test(
         #discretize = False,
         max_depth = 10,
         diffprivacy_mech = "lap",
-        budget =4., 
+        budget =5., 
         criterion="entropy", 
         min_samples_leaf=0, 
-        print_tree = True,
+        print_tree = False,
         is_prune = True,
         debug = False,
         random_state = 2):
 
-    print "# ==================================="
+    #print "# ==================================="
     print "diffprivacy\t", diffprivacy_mech
     print "budget\t\t", budget
     #print "discretize\t", discretize
     print "max_depth\t", max_depth
     print "criterion\t", criterion
-    print "print_tree\t", print_tree
+    #print "print_tree\t", print_tree
     print "is prune\t", is_prune
-    print "debug\t\t", debug
-    print "random\t\t", random_state
+    #print "debug\t\t", debug
+    #print "random\t\t", random_state
 
     nbtree = NBTreeClassifier(
                 max_depth       =max_depth, 
@@ -162,7 +162,7 @@ def nbtree_test(
     sorted_y_pred = y_pred[sorted_indices]
     sorted_y_prob = y_prob[sorted_indices]
 
-    fpr, tpr, threshs = metrics.roc_curve(y_true, y_prob, pos_label=1) 
+#    fpr, tpr, threshs = metrics.roc_curve(y_true, y_prob, pos_label=1) 
 #    print "thresh\tFPR\tTPR\t"
 #    for i, thresh in enumerate(threshs):
 #        print "%.2f\t%.2f\t%.2f"%(thresh, fpr[i], tpr[i])
@@ -179,37 +179,32 @@ def nbtree_test(
     print "AUC:", auc
 
     print 'print the limited number result:'
-    print 'first\tauc\trecall\tpricsn\tf1_score:'
+    print 'first\trecall\tpricsn\tf1_score\tauc'
     for i in [200,500,800,1100,1500]:
             sorted_y_pred = np.zeros(sorted_y_true.size)
             sorted_y_pred[0:i] = 1
 
-            #print sum(sorted_y_pred)
-            #print sum(sorted_y_true)
-
-            auc       = metrics.roc_auc_score(  sorted_y_true, sorted_y_prob)
+            #auc       = metrics.roc_auc_score(  sorted_y_true, sorted_y_prob)
             recall    = metrics.recall_score(   sorted_y_true, sorted_y_pred, average='micro')
             precision = metrics.precision_score(sorted_y_true, sorted_y_pred, average='micro')
             #f1_score = f1_score(test_label, predict2, average='micro')
             f1_score=2*precision*recall/(precision+recall)
 
-            print('[%d]\t%.3f\t%.3f\t%.3f\t%.3f'%(i, auc,recall,precision,f1_score))
+            print('[%d]\t%.3f\t%.3f\t%.3f\t%.3f'%(i, recall, precision, f1_score, auc))
+    print "\n"
 
     print 'print the threshold value result:'
-    print 'thresh\tauc\trecall\tprecsn\tf1_score:'
+    print 'thresh\trecall\tprecsn\tf1_score\tauc'
     for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
             y_pred = np.zeros( y_true.size)
             y_pred[np.where( y_prob >= t)] = 1
 
-            #print sum(y_pred)
-            #print sum(y_true)
-
-            auc       = metrics.roc_auc_score(  y_true, y_prob)
+            #auc       = metrics.roc_auc_score(  y_true, y_prob)
             recall    = metrics.recall_score(   y_true, y_pred, average='micro')
             precision = metrics.precision_score(y_true, y_pred, average='micro')
             #f1_score = f1_score(y_true, predict2, average='micro')
             f1_score  =2*precision*recall/(precision+recall)
-            print('[%.2f]\t%.3f\t%.3f\t%.3f\t%.3f'%(t, auc,recall,precision,f1_score))
+            print('[%.2f]\t%.3f\t%.3f\t%.3f\t%.3f'%(t, recall, precision, f1_score, auc))
 
 
     

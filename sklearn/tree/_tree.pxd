@@ -210,6 +210,3 @@ cdef class TreeBuilder:
 
     cpdef build(self, Tree tree, np.ndarray X, np.ndarray y,
                 np.ndarray sample_weight=*)
-
-cdef inline void sort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil
- 
