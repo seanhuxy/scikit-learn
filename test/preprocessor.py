@@ -5,6 +5,9 @@ from scipy.cluster.vq import kmeans2, vq
 import numbers
 import copy
 
+from sklearn.preprocessing import Imputer
+from time import time
+
 FEATURE_CONTINUOUS = 0
 FEATURE_DISCRET = 1
        
@@ -37,22 +40,21 @@ class Feature:
             data = np.array([data])
 
         if self.type == FEATURE_DISCRET:
-            ret_data = np.copy(data)
             
             if self.values is None:
                 raise Exception, "feature({0}) has no values".format( str(self) )
 
             if self.is_discretized:
-                ret_data, _ = vq( data, self.values)
+                data, _ = vq( data, self.values)
 
             else:
                 for i in range(len(data)):
                     if not self.indices.has_key(data[i]):
                         raise Exception, "feature({0}) has no value {1}".format( str(self), data[i])
 
-                    ret_data[i] = self.indices[data[i]]
+                    data[i] = self.indices[data[i]]
 
-            return ret_data
+            return data
 
         else: # continuous
             return data
@@ -66,8 +68,7 @@ class Feature:
         f = self
         if method == "cluster":
             centeriods, _ = kmeans2( data, nbins, iter=20) 
-            centeriods = np.sort(centeriods)
-            centeriods = np.unique(centeriods)	
+            centeriods = np.unique(centeriods)
         
         else:
             max = self.max
@@ -85,7 +86,7 @@ class Feature:
                 centeriods[j] = (j+0.5)*interval
 
         # transfer data 
-        converted_data, _ = vq( data, centeriods)
+        #data, _ = vq( data, centeriods)
 
         f.values = centeriods
         f.n_values = len(centeriods)
@@ -93,7 +94,7 @@ class Feature:
         f.is_discretized = True
         f.type = FEATURE_DISCRET
 
-        return converted_data
+        #return data
         
     def parse(self, string):
         ''' parse a string, to get the feature's meta data '''
@@ -153,15 +154,11 @@ class Feature:
         if self.type == FEATURE_DISCRET:
             values = []
             indices = {}
- 
-            for v in data:
-                if v not in values:
-                    #indices[v] = len(values)
-                    values.append(v)
 
-            np.sort(values)
+            values = np.unique( data )
+
             for i, v in enumerate(values):
-                indices[v] = i
+                indices[ v ] = i
 
             self.n_values = len(values)
             self.values = values
@@ -172,15 +169,20 @@ class Feature:
             if len(data) <= 0:
                 raise Exception, "No content in data {0}".format(data)
 
-            max_ = data[0]
-            min_ = data[0]
+            #max_ = data[0]
+            #min_ = data[0]
 
-            for v in data:
-                max_ = v if v > max_ else max_
-                min_ = v if v < min_ else min_
+            #for v in data:
+            #    max_ = v if v > max_ else max_
+            #    min_ = v if v < min_ else min_
 
-            self.max = max_
-            self.min = min_
+            max_ = np.max(data)
+            min_ = np.min(data)
+
+            self.max = max_ if self.max in [None, np.NaN] or max_ > self.max else self.max
+            self.min = min_ if self.min in [None, np.NaN] or min_ < self.min else self.min
+
+            #print str(self)
 
         else:
             raise Exception, "Unknown feature type", self.type
@@ -227,8 +229,6 @@ class Preprocessor:
 
         self.is_discretized = False
 
-        self.is_rm_missing = False
-
     def check_load(self):
         if self.data is None or self.features is None:
             raise Exception, "Warning, please first input raw dataset by load() function"
@@ -262,61 +262,73 @@ class Preprocessor:
         self.check_load()
         return self.features
 
+    # legacy
     def discretize(self, nbins = 10, method = "cluster"):
         self.check_load()
 
         features = self.features
         data = self.data
 
+        print "discretizing..."
         for i in range(len(features)):
             f = features[i]
             if f.type is not FEATURE_CONTINUOUS:
                 continue
 
+            print "discretizing f %d"%i
             values = np.take(data, i, axis = 1)
-            new_values = f.discretize( values, nbins, method)
-            data[:,i] = new_values
+            values = f.discretize( values, nbins, method)
+            data[:,i] = values
 
         self.is_discretized = True
         return self
 
+    def _export_data(self, data_file, data):
+    
+        of = open(data_file, 'w')
+        
+        for row in data:
+            string = ""
+            for v in row:
+                string += "{0} ".format(v) 
+                #of.write("{0} ".format(v))
+            string = string.rstrip(" ")
+            of.write(string+"\n")
+        of.close()
+
+
     def export(self, feature_file, train_data_file, test_data_file):
         self.check_load()
 
-        print "begin to export"
+        print "exporting..."
         features = self.features
-        train_data = self.get_train()
-        test_data  = self.get_test()
 
+        print "exporting to feature file..."
         of = open(feature_file, 'w')
         for f in features:
             of.write(str(f))
             of.write("\n")
         of.close()
 
-        def _export_data( data_file, data):
-            of = open(data_file, 'w')
-            
-            for row in data:
-                string = ""
-                for v in row:
-                    string += "{0} ".format(v) 
-                    #of.write("{0} ".format(v))
-                string = string.rstrip(" ")
-                of.write(string+"\n")
-            of.close()
+        train_data = self.get_train()
+        print "exporting to train data file...",
+        t1 = time()
+        np.save(train_data_file, train_data)
+        t2 = time()
+        print "%.2f"%(t2-t1)
 
-        _export_data( train_data_file, train_data)
-        _export_data( test_data_file,  test_data)
+        test_data  = self.get_test()
+        print "exporting to test data file...",
+        t1 = time()
+        np.save(test_data_file,  test_data)
+        t2 = time()
+        print "%.2f"%(t2-t1)
 
         print "finished export"
 
-        #_export_data( train_data_file+".origin", self.origin_train)
-        #_export_data( test_data_file+".origin", self.origin_test)
-
         return self
 
-    def load_arff(self, arff_file):
+    def load_arff(self, arff_file, train_to_test = "9:1"):
 
         data, meta = arff.loadarff(arff_file)
         names = meta.names()
@@ -382,6 +394,15 @@ class Preprocessor:
             
         self.features = features
         self.data = new_data
+
+        n_samples = new_data.shape[0]
+
+        if train_to_test == "9:1":
+
+            self.n_train_samples = 9 * (n_samples // 10)
+            self.n_test_samples  = n_samples - self.n_train_samples
+            print "train %d, test %d"%(self.n_train_samples, self.n_test_samples)
+
         return self
 
     def _load_features(self, feature_file):
@@ -404,69 +425,84 @@ class Preprocessor:
        
             the number of columns should equals to the number of features in feature_file
         '''
-        #data = np.loadtxt( data_file )
-        #if data.ndim != 2:
-        #    raise Exception, "data is not 2-dimension array"
+        data = np.loadtxt( data_file )
+        if data.ndim != 2:
+            raise Exception, "data is not 2-dimension array"
 
-        names = [ f.name for f in features]
-        d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
+        #names = [ f.name for f in features]
+        #d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
     
-        data = np.array(d)
+        #data = np.array(d)
         #print data
 
-        def remove_missing( array ):
-
-            print "before elimiate missing value, shape:", array.shape
-            del_row = []
-            for i, row in enumerate(array):
-                for col in row:
-                    if col == '?':
-                        del_row.append(i)
-
-            array = np.delete( array, del_row, axis=0)
-            print "after elimiate missing value, shape:", array.shape
-            return array
-
-        if self.is_rm_missing:
-            data = remove_missing(data)
-
-        n_samples, n_features = data.shape[0], data.shape[1]
-        if n_features != len(features):
-            raise Exception, "number of features {0} in data is not consistent with that {1} in feature file".format(n_features, len(features))
+        #n_samples, n_features = data.shape[0], data.shape[1]
+        #if n_features != len(features):
+        #    raise Exception, "number of features {0} in data is not consistent with that {1} in feature file".format(n_features, len(features))
 
         return data
 
     def load_raw(self, feature_file, train_data_file, test_data_file, sep=" "):
         ''' load from non-arff raw file '''
+
+        print "load feature file..."
         features   = self._load_features( feature_file )
-        train_data = self._load_data(features, train_data_file, sep=sep )
-        test_data  = self._load_data(features, test_data_file, sep=sep )
 
+        print "load train data...",
+        t1 = time()
+        train_data = np.load(train_data_file)
+        t2 = time()
+        print "%.2f"%(t2-t1)
+        
         n_train_samples = train_data.shape[0]
-        n_test_samples  = test_data.shape[0]
-        n_features = train_data.shape[1]
+        n_features      = train_data.shape[1]
 
-        data = np.concatenate((train_data, test_data), axis=0)
+        if test_data_file is not None:
+            
+            print "load test data...",
+            t1 = time()
+            test_data = np.load(test_data_file)
+            t2 = time()
+            print "%.2f"%(t2-t1)
+        
+            n_test_samples  = test_data.shape[0]
 
+            print "concatenate...",
+            t1 = time()
+            data = np.concatenate((train_data, test_data), axis=0)
+            t2 = time()
+            print "%.2f"%(t2-t1)
+        else:
+            data = train_data
+
+        print "parsing from data..."
         for i in range(n_features):
-            cols = np.take(data, i, axis=1)
-            features[i].parse_meta_from_data( cols )
-            new_cols =  features[i].transfer( cols )
-            data[:,i] = new_cols
+            f = features[i]
+            print "[%d] f: %s, type %d"%(i, f.name, f.type)
 
-        data = data.astype(float)
-        def remove_col(data, col):
-            data = np.delete( data, col, axis=1)
-            return data
+            values = data[:, i]
 
-        #data = remove_col( data, 0)
-        #del features[0]
+            f.parse_meta_from_data( values )
 
-        self.origin_train = train_data
-        self.origin_test  = test_data
+            if f.type is FEATURE_CONTINUOUS and self.is_discretize:
+                t1 = time()
+                f.discretize( values, self.nbins, self.dmethod)
+                t2 = time()
+                print "discretize takes  %.2fs"%(t2-t1)
+
+            if f.type is FEATURE_CONTINUOUS:
+                continue
+            else:
+                values =  f.transfer( values )
+                data[:,i] = values
+
+            print "\n"
+
+        if test_data_file is not None:
+            self.n_test_samples = n_test_samples
+        else :
+            self.n_test_samples = 0
 
         self.n_train_samples = n_train_samples
-        self.n_test_samples  = n_test_samples
         self.data = data
         self.features = features
         return self
@@ -480,30 +516,85 @@ class Preprocessor:
             DO NOT call Preprocessor.discretize() after this function '''
 
         features = self._load_features( feature_file )
-        train_data = self._load_data(features, train_data_file )
-        test_data  = self._load_data(features, test_data_file )
 
-        #print train_data
-
+        print "load train data...",
+        t1 = time()
+        train_data = np.load(train_data_file)
+        t2 = time()
+        print "%.2f"%(t2-t1)
+        
         n_train_samples = train_data.shape[0]
-        n_test_samples  = test_data.shape[0]
-        n_features = train_data.shape[1]
+        n_features      = train_data.shape[1]
 
+        print "load test data...",
+        t1 = time()
+        test_data  = np.load(test_data_file)
+        t2 = time()
+        print "%.2f"%(t2-t1)
+
+        n_test_samples  = test_data.shape[0]
         data = np.concatenate((train_data, test_data), axis=0)
 
-        data = data.astype(float)
+        #data = data.astype(float)
 
         self.n_train_samples = n_train_samples
         self.n_test_samples  = n_test_samples
-        self.data = data
+        self.data   = data
         self.features = features
         return self
 
-    def load(self, feature_file, train_data_file=None, test_data_file=None, sep=" "):
+    def load(self, feature_file, train_data_file=None, test_data_file=None, sep=" ", is_discretize = True, nbins=10, dmethod="cluster"):
         ''' load from raw data format, the data need to be preprocessed '''
+
+        self.nbins = nbins
+        self.dmethod = dmethod
+        self.is_discretize = is_discretize
 
         if feature_file.endswith(".arff"):
             self.load_arff(feature_file)
         else:
             self.load_raw(feature_file, train_data_file, test_data_file, sep=sep)
         return self
+    
+    def clean(self, data_in, sep=" "):
+
+        data_out = data_in+".npy"
+
+        t1 = time()
+        data = np.loadtxt( data_in )
+        t2 = time()
+        print "loaded data... %.2fs"%(t2-t1)
+
+        # remove the first col
+        t1 = time()
+        data = np.delete( data, 0, axis=1)
+        t2 = time()
+        print "finished removing phone number... %.2fs"%(t2-t1)
+
+        print "data shape", data.shape
+
+        def remove_missing_value( X, strategy="most_frequent", missing_values="NaN"):
+
+            if strategy is "remove":
+                X = X[ ~np.isnan(X).any(axis=1) ]
+                return X
+
+            imp = Imputer(missing_values='NaN', strategy=strategy, axis=0)
+            X = imp.fit_transform(X)
+            return X
+
+        t1 = time()
+        data = remove_missing_value( data, strategy = "mean")
+        t2 = time()
+        print "remove missing value... %.2fs"%(t2-t1)
+
+        print "n_samples %d n_features %d"%data.shape
+
+        t1 = time()
+        np.save(data_out, data )
+        t2 = time()
+        print "save... %.2fs"%(t2-t1)
+
+        return data
+
+

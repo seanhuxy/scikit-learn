@@ -62,7 +62,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                 criterion = "gini",
 
                 max_depth = 5,
-                max_candid_features = 10,
+                max_candid_features = 14,
                 min_samples_leaf = 0,
 
                 CF = 0.25,
@@ -174,7 +174,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         max_candid_features = self.max_candid_features 
 
         criterion = CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
-        splitter  = SPLITTERS[diffprivacy_mech ](criterion, max_candid_features, random_state, debug)
+        splitter  = SPLITTERS[diffprivacy_mech ](criterion,  random_state, debug)
 
         tree = Tree(dataobject, debug)
         self._tree = tree

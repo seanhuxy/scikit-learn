@@ -1,7 +1,7 @@
 import os
 import sys
 import numpy as np
-
+from time import time
 #abspath = os.path.abspath(__file__)
 
 cwd = os.getcwd()
@@ -9,67 +9,11 @@ sys.path.append(cwd)
 
 import sklearn
 from sklearn.tree import NBTreeClassifier
-from sklearn.ensemble import RandomForestClassifier as RandomForest
-from sklearn.ensemble import ForestClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.cross_validation import cross_val_score
 from sklearn import metrics
 
 from preprocessor import Preprocessor
-
-
-def cross_val():
-
-    output =  cross_val_score(nbtree, X, y, cv=5, fit_params={'meta':meta, 'debug':debug})
-
-    print output
-    print "Average Accuracy:", np.average(output)
-    print "# =========================================" 
-    print "\n"
-
-class DiffPrivacyRandomForestClassifier(ForestClassifier):
-
-    def __init__(self, 
-                base_estimator = NBTreeClassifier,
-                n_estimators   = 10,
-                bootstrap=True,
-                oob_score=False,
-                n_jobs=1,
-                random_state=None,
-                verbose=False,
-                # estimator params
-                diffprivacy_mech = "no",
-                budget = -1.0,
-                criterion = "gini",
-                max_depth = 10,
-                min_samples_leaf = 1,
-                is_prune = True,
-                print_tree = True,
-                debug=False,
-                ):
-
-        super( DiffPrivacyRandomForestClassifier, self).__init__(
-            base_estimator=base_estimator,
-            n_estimators=n_estimators,
-            estimator_params=("diffprivacy_mech","budget","criterion", 
-                            "max_depth", "min_samples_leaf", "is_prune",
-                            "print_tree", "debug"),
-            bootstrap=bootstrap,
-            oob_score=oob_score,
-            n_jobs=n_jobs,
-            random_state=random_state,
-            verbose=verbose)
-
-        self.diffprivacy_mech=diffprivacy_mech
-        if budget > 0.0 and n_estimators > 0:
-            budget /= n_estimators
-        self.budget=budget
-
-        self.criterion = criterion
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.is_prune = is_prune
-        self.print_tree = True
-        self.debug = debug
 
 
 def nbtree_test(
@@ -78,13 +22,13 @@ def nbtree_test(
         meta,
 
         #discretize = False,
-        max_depth = 10,
-        diffprivacy_mech = "lap",
+        max_depth = 1,
+        diffprivacy_mech = "no",
         budget =5., 
-        criterion="entropy", 
+        criterion="gini", 
         min_samples_leaf=0, 
-        print_tree = False,
-        is_prune = True,
+        print_tree = True,
+        is_prune = False,
         debug = False,
         random_state = 2):
 
@@ -111,29 +55,20 @@ def nbtree_test(
 
     nbtree.set_meta(meta)
 
-    n_estimators = 10
+    tree = DecisionTreeClassifier(max_depth=2)
+    tree.fit(X,y)
 
-    rf = DiffPrivacyRandomForestClassifier( 
-            base_estimator=nbtree,
-            n_estimators = n_estimators,
-            n_jobs=-1,
-            
-            diffprivacy_mech=diffprivacy_mech,
-            budget=budget,
-            criterion    = criterion,
-            max_depth    = max_depth,
-            min_samples_leaf=min_samples_leaf,
-            is_prune = is_prune,
-            print_tree=print_tree,
-            debug=debug)
-
-    #rf.fit( X, y )
-
+    print "fitting..."
+    t1 = time()
     nbtree = nbtree.fit(X, y )
+    t2 = time()
+    print "Time for fitting %.2fs"%(t2-t1)
+
+    #clf =tree
     clf = nbtree
 
     y_true = y_test
-    y_prob = clf.predict_proba(X_test)[:,1]
+    y_prob = clf.predict_proba(X_test)[:,-1]
     y_pred = clf.predict( X_test )
 
     score  = metrics.accuracy_score(    y_test, y_pred)
@@ -175,6 +110,9 @@ def nbtree_test(
         plt.xlabel("False Positive Rate")
         plt.show()
 
+    #print y_true
+    #print y_prob
+
     auc = metrics.roc_auc_score( y_true, y_prob)
     print "AUC:", auc
 
@@ -207,26 +145,25 @@ def nbtree_test(
             print('[%.2f]\t%.3f\t%.3f\t%.3f\t%.3f'%(t, recall, precision, f1_score, auc))
 
 
-    
-
 def preprocess():
     is_load_from_raw = True
 
-    #feature_in     = os.path.join(cwd, "dataset/adult_nomissing.arff")
     feature_in     = os.path.join(cwd, "dataset/feature.in")
-
     feature_out    = os.path.join(cwd, "dataset/feature.out")
 
-    train_data_in  = os.path.join(cwd, "dataset/data.in")
+    train_data_in  = os.path.join(cwd, "dataset/data.npy")
     train_data_out = os.path.join(cwd, "dataset/data.out")
 
-    test_data_in   = os.path.join(cwd, "dataset/test.in")
-    test_data_out  = os.path.join(cwd, "dataset/test.out")
+    test_data_in   = os.path.join(cwd, "dataset/data.npy")
+    test_data_out  = os.path.join(cwd, "dataset/data.out")
+
+    #test_data_in = None
 
     preprocessor = Preprocessor()
     if is_load_from_raw:
-        preprocessor.load( feature_in, train_data_in, test_data_in, sep=" ")
-        preprocessor.discretize(nbins=10)
+        preprocessor.load( feature_in, train_data_in, test_data_in, sep=" ", 
+                            is_discretize= False, nbins=10)
+
         preprocessor.export( feature_out, train_data_out, test_data_out)
 
     else:
@@ -237,7 +174,9 @@ def preprocess():
 
 if __name__ == "__main__":
 
+
     preprocessor = preprocess()
+    #exit()
 
     train = preprocessor.get_train()
     test  = preprocessor.get_test()
@@ -245,6 +184,12 @@ if __name__ == "__main__":
     X,      y      = train[:,:-1], train[:,-1]
     X_test, y_test = test[:,:-1], test[:,-1]
 
+    y = np.ascontiguousarray(y)
+    y_test = np.ascontiguousarray(y_test)
+
+    t1 = time()
     nbtree_test(X, y, X_test, y_test, preprocessor)
+    t2 = time()
+    print "Time costs %.2fs"%(t2-t1)
 
 

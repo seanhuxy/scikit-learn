@@ -136,7 +136,7 @@ cdef class Splitter:
     cdef UINT32_t rand_r_state      # sklearn_rand_r random number state
 
     # Methods
-    cdef void init(self, Data* data)
+    cdef void init(self, Data* data, SIZE_t max_candid_features)
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          DOUBLE_t* weighted_n_node_samples) # nogil

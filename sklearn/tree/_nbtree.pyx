@@ -634,7 +634,6 @@ cdef class Splitter:
 
     def __cinit__(self,
                     Criterion criterion,
-                    SIZE_t max_candid_features,
                     object random_state, 
                     bint debug):
 
@@ -652,7 +651,7 @@ cdef class Splitter:
         self.n_features = 0
 
         self.feature_values  = NULL # tempory array
-        self.max_candid_features = max_candid_features
+        self.max_candid_features = -1
    
         self.debug = debug
     
@@ -661,7 +660,7 @@ cdef class Splitter:
         free(self.features_win)
         free(self.feature_values)
 
-    cdef void init(self, Data* data) except *:
+    cdef void init(self, Data* data, SIZE_t max_candid_features ) except *:
         ''' set data
             alloc samples_win, features_win, feature_values
         '''
@@ -683,6 +682,8 @@ cdef class Splitter:
 
         # set data
         self.data = data
+
+        self.max_candid_features = max_candid_features
 
     cdef void node_reset(self, 
                 SIZE_t start, 
@@ -738,6 +739,10 @@ cdef class Splitter:
                 best feature for split,
                 best split point (for continuous feature)
         '''
+        
+        cdef UINT32_t* rand = &self.rand_r_state
+        cdef SIZE_t max_candid_features = self.max_candid_features
+        
         # create and init split records
         cdef SIZE_t n_node_features = ptr_n_node_features[0]
 
@@ -757,9 +762,7 @@ cdef class Splitter:
         cdef SIZE_t* samples_win = self.samples_win
         cdef Feature* feature
         cdef SIZE_t* features_win = self.features_win 
-        cdef SIZE_t f_j = 0
         cdef SIZE_t p = 0
-        cdef SIZE_t tmp
 
         cdef DTYPE_t* Xf  = self.feature_values
         cdef SIZE_t start = self.start
@@ -776,18 +779,42 @@ cdef class Splitter:
         if 0:
             printf("node_split(): epsilon_per_feature is %f\n", epsilon_per_feature)
 
-        if debug:
+        if 1:
             printf("\nnode_split(): N=%d (%d-%d)\n", end-start, start, end)
             printf("\t %u Features:", n_node_features)
-            for f_j in range(n_node_features):
-                printf("%u, ",features_win[f_j])
+            for i in range(n_node_features):
+                printf("%u, ",features_win[i])
             printf("\n")
 
         if start >= end:
             return NULL
        
-        f_j = 0
-        while f_j < n_node_features :
+
+        cdef SIZE_t visited_cnt = 0
+
+        cdef SIZE_t f_v = 0     # #of feature visited
+        cdef SIZE_t f_j = 0
+        cdef SIZE_t f_i = n_node_features
+
+        cdef SIZE_t tmp
+
+        # [     : f_v ) : features that has been visited but not constant
+        # [ f_v : f_i ) : features that are waiting to be visited 
+        #    f_j is sampled randomely from this interval
+        # [ f_i : n_node_features ): constant features found in this node
+
+        while f_v < f_i and visited_cnt < max_candid_features : 
+        #while f_j < n_node_features :
+
+            visited_cnt += 1    
+
+            #f_j = f_v + rand_int( f_i - f_v, rand ) 
+            f_j = f_v
+
+            if f_j < f_v or f_j >= f_i :
+                printf("f_j %d is not in [%d, %d)\n", f_j, f_v, f_i)
+                exit(1)
+
             # copy to Xf
             for p in range(start, end):
                 # Xf[p] = X[sample_index, feature_index] 
@@ -803,14 +830,16 @@ cdef class Splitter:
                     printf("node_split(): f[%u] X[%d]=%f, X[%d]=%f is close, ignore this f\n",
                             features_win[f_j], start, Xf[start], end-1, Xf[end-1])
 
-                tmp                             = features_win[f_j] 
-                features_win[f_j]               = features_win[n_node_features-1]
-                features_win[n_node_features-1] = tmp
+                f_i -= 1
+                # switch f_j and f_i 
+                #features_win[f_j], features_win[f_i] = features_win[f_i], features_win[f_j]
+                tmp               = features_win[f_j] 
+                features_win[f_j] = features_win[f_i]
+                features_win[f_i] = tmp
 
-                n_node_features -= 1
                 # goes to next candidate feature
 
-            # not constant feature.format(best_i, n_node_features)
+            # not constant feature
             else:                
                 current = &feature_records[f_j]
                 current.feature_index = features_win[f_j]
@@ -861,6 +890,13 @@ cdef class Splitter:
                                                 current.n_subnodes,
                                                 impurity, 
                                                 epsilon_per_feature)  # XXX only for laplace mech
+
+                if 1:
+                    printf("f: %2u %15s\n", features_win[f_j], feature.name)
+                    for i in range(current.n_subnodes):
+                        printf("%2d, ", current.n_subnodes_samples[i] )
+                    printf("\n")
+
                 if 0:
                     for i in range(current.n_subnodes):
                         printf("\t\tsub[%2d] n=%6d\t",
@@ -868,35 +904,42 @@ cdef class Splitter:
                         printf("%6.0f:%6.0f\n", 
                             self.criterion.label_count[i* self.criterion.feature_stride],
                             self.criterion.label_count[i* self.criterion.feature_stride + 1])
-                
-                
+
+                # switch f_v and f_j
+                #features_win[f_v], features_win[f_j] = features_win[f_j] features_win[f_v]
+                tmp               = features_win[f_j] 
+                features_win[f_j] = features_win[f_v]
+                features_win[f_v] = tmp
+
+                feature_records[f_v], feature_records[f_j] = feature_records[f_j], feature_records[f_v]
+                current = &feature_records[f_v]
                 if current.improvement > best_improvement:
                     best_improvement = current.improvement
-                    best_i = f_j
+                    best_i = f_v
 
                 elif best_i == -1:
                     printf("node_split: Error, best_i == -1\n")
                     exit(1)
-                    
-                f_j += 1
+                
+                f_v += 1
+                #f_j += 1
         
         # if there's no any feature which can be splitted 
-        if best_i < 0 or best_i >= n_node_features:
+        if best_i < 0 or best_i >= f_i :
             if best_i == -1:
-                if n_node_features != 0 or f_j != 0:
-                    printf("node_split: \
-                            n_node_features[%d] and f_j[%d] should be 0 \
-                            when no best feature",
-                            n_node_features, f_j)
-                    exit(1)
+                #if n_node_features != 0 or f_j != 0:
+                #    printf("node_split: \
+                #            n_node_features[%d] and f_j[%d] should be 0 \
+                #            when no best feature",
+                #            n_node_features, f_j)
+                #    exit(1)
 
                 return NULL
                 
-            printf("best feature index %d should between [0, %d)\n",
-                    best_i, n_node_features)
+            printf("best feature index %d should between [0, %d)\n",best_i, f_i)
             exit(1)
 
-        if 0:
+        if 1:
             for f_j in range(n_node_features):
                 printf("\tfeature[%2u, %15s]", 
                         features_win[f_j], 
@@ -905,17 +948,21 @@ cdef class Splitter:
                 if data.features[ features_win[f_j] ].type == FEATURE_CONTINUOUS:
                     printf("(%6.1f)\t", feature_records[f_j].threshold)
                 else:
-                    printf("\t\t\t")
+                    printf("\t\t")
 
                 printf("=%6.1f", feature_records[f_j].improvement)
 
                 if f_j == best_i:
                     printf(" Max")
+                printf("\t")
+                
+                for i in range(feature_records[f_j].n_subnodes):
+                    printf("%2d, ", feature_records[f_j].n_subnodes_samples[i] )
                 printf("\n")
 
         if diffprivacy_mech == EXP_DIFF_RPIVACY_MECH:
             best_i = self._choose_split_feature(feature_records, 
-                                                n_node_features,
+                                                f_v,
                                                 epsilon)        
 
         if debug:
@@ -927,11 +974,11 @@ cdef class Splitter:
 
         _copy_split(&feature_records[best_i], best)
        
-        # switch best_i and n_node_features-1 in features_win
+        # switch best_i and f_i-1 in features_win
+        # features_win[best_i], features_win[f_i-1] = features_win[f_i-1], features_win[best_i]
         tmp                  = features_win[best_i]
-        features_win[best_i] = features_win[n_node_features-1]
-        features_win[n_node_features-1]  = tmp
-
+        features_win[best_i] = features_win[f_i-1]
+        features_win[f_i-1]  = tmp
         # sort Xf based on best feature
         for p in range(start, end):
             # Xf[p] = X[sample_index, feature_index]
@@ -962,9 +1009,9 @@ cdef class Splitter:
         free(feature_records)
       
         if data.features[ best.feature_index ].type == FEATURE_CONTINUOUS:
-            ptr_n_node_features[0] = n_node_features
+            ptr_n_node_features[0] = f_i
         else:
-            ptr_n_node_features[0] = n_node_features - 1
+            ptr_n_node_features[0] = f_i - 1
         
         return best
 
@@ -1384,7 +1431,7 @@ cdef class NBTreeBuilder:
         if debug:
             printf("begin to build tree\n")
 
-        splitter.init(data) # set samples_win, features_win
+        splitter.init(data, max_candid_features) # set samples_win, features_win
         cdef SplitRecord* split_record 
 
         cdef SIZE_t max_depth_seen = -1 # record the max depth ever seen
@@ -1468,10 +1515,16 @@ cdef class NBTreeBuilder:
                 if not is_leaf:
                     # with gil:
                     if 1:
+                        from time import time
+                        print "node split..."
+                        t1 = time()
                         split_record = splitter.node_split(&n_node_features, 
                                                             impurity, 
                                                             diffprivacy_mech,  
                                                             epsilon_per_action )
+                        t2 = time()
+                        print "done in %.2f"%(t2-t1)
+
                         if split_record != NULL:
                             is_leaf = is_leaf or (split_record.feature_index == -1)
                       
