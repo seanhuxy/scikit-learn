@@ -22,15 +22,15 @@ def nbtree_test(
         meta,
 
         #discretize = False,
-        max_depth = 1,
+        max_depth = 10,
         diffprivacy_mech = "no",
         budget =5., 
         criterion="gini", 
         min_samples_leaf=0, 
-        print_tree = True,
+        print_tree = False,
         is_prune = False,
         debug = False,
-        random_state = 2):
+        random_state = 1024):
 
     #print "# ==================================="
     print "diffprivacy\t", diffprivacy_mech
@@ -51,15 +51,16 @@ def nbtree_test(
                 print_tree      =print_tree, 
                 min_samples_leaf=min_samples_leaf,
                 is_prune        = is_prune,
-                random_state    = random_state)
+                random_state    = random_state,
+                debug   = debug)
 
     nbtree.set_meta(meta)
 
-    tree = DecisionTreeClassifier(max_depth=2)
-    tree.fit(X,y)
+    tree = DecisionTreeClassifier(max_depth=10)
 
     print "fitting..."
     t1 = time()
+    #tree.fit(X,y)
     nbtree = nbtree.fit(X, y )
     t2 = time()
     print "Time for fitting %.2fs"%(t2-t1)
@@ -151,10 +152,12 @@ def preprocess():
     feature_in     = os.path.join(cwd, "dataset/feature.in")
     feature_out    = os.path.join(cwd, "dataset/feature.out")
 
-    train_data_in  = os.path.join(cwd, "dataset/data.npy")
+    #train_data_in  = os.path.join(cwd, "dataset/data.npy")
+    train_data_in  = os.path.join(cwd, "dataset/adult.data")
     train_data_out = os.path.join(cwd, "dataset/data.out")
 
-    test_data_in   = os.path.join(cwd, "dataset/data.npy")
+    test_data_in   = os.path.join(cwd, "dataset/adult.data")
+    #test_data_in   = os.path.join(cwd, "dataset/data.npy")
     test_data_out  = os.path.join(cwd, "dataset/data.out")
 
     #test_data_in = None

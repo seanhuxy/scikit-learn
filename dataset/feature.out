@@ -1,15 +1,15 @@
 age continuous 17.0 90.0
-workclass discret 7 0.0 1.0 2.0 3.0 4.0 5.0 6.0 
-fnlwgt continuous 13492.0 1490400.0
-education discret 16 0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 11.0 12.0 13.0 14.0 15.0 
+workclass discret 9 ? Federal-gov Local-gov Never-worked Private Self-emp-inc Self-emp-not-inc State-gov Without-pay 
+fnlwgt continuous 12285 1490400.0
+education discret 16 10th 11th 12th 1st-4th 5th-6th 7th-8th 9th Assoc-acdm Assoc-voc Bachelors Doctorate HS-grad Masters Preschool Prof-school Some-college 
 education-num continuous 1.0 16.0
-marital-status discret 7 0.0 1.0 2.0 3.0 4.0 5.0 6.0 
-occupation discret 14 0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 11.0 12.0 13.0 
-relationship discret 6 0.0 1.0 2.0 3.0 4.0 5.0 
-race discret 5 0.0 1.0 2.0 3.0 4.0 
-sex discret 2 0.0 1.0 
+marital-status discret 7 Divorced Married-AF-spouse Married-civ-spouse Married-spouse-absent Never-married Separated Widowed 
+occupation discret 15 ? Adm-clerical Armed-Forces Craft-repair Exec-managerial Farming-fishing Handlers-cleaners Machine-op-inspct Other-service Priv-house-serv Prof-specialty Protective-serv Sales Tech-support Transport-moving 
+relationship discret 6 Husband Not-in-family Other-relative Own-child Unmarried Wife 
+race discret 5 Amer-Indian-Eskimo Asian-Pac-Islander Black Other White 
+sex discret 2 Female Male 
 capital-gain continuous 0.0 99999.0
 capital-loss continuous 0.0 4356.0
 hours-per-week continuous 1.0 99.0
-native-country discret 41 0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 11.0 12.0 13.0 14.0 15.0 16.0 17.0 18.0 19.0 20.0 21.0 22.0 23.0 24.0 25.0 26.0 27.0 28.0 29.0 30.0 31.0 32.0 33.0 34.0 35.0 36.0 37.0 38.0 39.0 40.0 
-class discret 2 0.0 1.0 
+native-country discret 42 ? Cambodia Canada China Columbia Cuba Dominican-Republic Ecuador El-Salvador England France Germany Greece Guatemala Haiti Holand-Netherlands Honduras Hong Hungary India Iran Ireland Italy Jamaica Japan Laos Mexico Nicaragua Outlying-US(Guam-USVI-etc) Peru Philippines Poland Portugal Puerto-Rico Scotland South Taiwan Thailand Trinadad&Tobago United-States Vietnam Yugoslavia 
+class discret 2 <=50K >50K 

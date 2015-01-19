@@ -425,19 +425,19 @@ class Preprocessor:
        
             the number of columns should equals to the number of features in feature_file
         '''
-        data = np.loadtxt( data_file )
-        if data.ndim != 2:
-            raise Exception, "data is not 2-dimension array"
+        #data = np.loadtxt( data_file )
+        #if data.ndim != 2:
+        #    raise Exception, "data is not 2-dimension array"
 
-        #names = [ f.name for f in features]
-        #d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
+        names = [ f.name for f in features]
+        d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
     
-        #data = np.array(d)
+        data = np.array(d)
         #print data
 
-        #n_samples, n_features = data.shape[0], data.shape[1]
-        #if n_features != len(features):
-        #    raise Exception, "number of features {0} in data is not consistent with that {1} in feature file".format(n_features, len(features))
+        n_samples, n_features = data.shape[0], data.shape[1]
+        if n_features != len(features):
+            raise Exception, "number of features {0} in data is not consistent with that {1} in feature file".format(n_features, len(features))
 
         return data
 
@@ -449,7 +449,11 @@ class Preprocessor:
 
         print "load train data...",
         t1 = time()
-        train_data = np.load(train_data_file)
+        if train_data_file.endswith(".npy"):
+            train_data = np.load(train_data_file)
+        else:
+            train_data = self._load_data(features, train_data_file)
+            
         t2 = time()
         print "%.2f"%(t2-t1)
         
@@ -460,7 +464,11 @@ class Preprocessor:
             
             print "load test data...",
             t1 = time()
-            test_data = np.load(test_data_file)
+            if test_data_file.endswith(".npy"):
+                test_data = np.load(test_data_file)
+            else:
+                test_data = self._load_data(features, test_data_file)
+
             t2 = time()
             print "%.2f"%(t2-t1)
         
@@ -474,10 +482,12 @@ class Preprocessor:
         else:
             data = train_data
 
+        #print data
+
         print "parsing from data..."
         for i in range(n_features):
             f = features[i]
-            print "[%d] f: %s, type %d"%(i, f.name, f.type)
+            #print "[%d] f: %s, type %d"%(i, f.name, f.type)
 
             values = data[:, i]
 
@@ -495,7 +505,9 @@ class Preprocessor:
                 values =  f.transfer( values )
                 data[:,i] = values
 
-            print "\n"
+        data = data.astype("float") # for dataset read from cvs
+        #print data.dtype
+        #print data
 
         if test_data_file is not None:
             self.n_test_samples = n_test_samples

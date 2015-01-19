@@ -69,9 +69,10 @@ cdef class Criterion:
     
     cdef SIZE_t start
     cdef SIZE_t end
+    cdef SIZE_t pos                     # for continuous feature
     
-    cdef DOUBLE_t* label_count_total    # shape[n_outputs][max_n_classes]
-    cdef DOUBLE_t* label_count          # shape[max_n_feature_values][n_outputs][max_n_classes] 
+    cdef double* label_count_total    # shape[n_outputs][max_n_classes]
+    cdef double* label_count          # shape[max_n_feature_values][n_outputs][max_n_classes] 
 
     cdef SIZE_t label_count_stride      # = max_n_classes
     cdef SIZE_t feature_stride          # = n_outputs * max_n_classes
@@ -89,12 +90,18 @@ cdef class Criterion:
                    SIZE_t* samples_win,
                    SIZE_t start,
                    SIZE_t end) # nogil
-    cdef void update(self, 
+
+    cdef void reset(self, SIZE_t feature_index)   # only used for continuous feature
+    # for continuous feature
+    cdef void cupdate(self, SIZE_t* samples_win, SIZE_t feature_index, SIZE_t new_pos) 
+    cdef void dupdate(self,                                      # for discret feature 
                      SIZE_t* samples_win,
-                     SplitRecord* split_record,
+                     SIZE_t  feature_index,
                      DTYPE_t* Xf) # nogil
+
+
     cdef DOUBLE_t node_impurity(self) # nogil
-    cdef DOUBLE_t children_impurity(self, DOUBLE_t* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
+    cdef DOUBLE_t children_impurity(self, double* label_count, DOUBLE_t wn_samples, DOUBLE_t epsilon) # nogil
 
     cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes, 
                             DOUBLE_t impurity, DOUBLE_t epsilon) # nogil
@@ -108,12 +115,13 @@ cdef class Criterion:
 # =======================================================================
 cdef struct SplitRecord:
     SIZE_t feature_index    # the index of the feature to split
-    DOUBLE_t threshold        # for continuous feature only
     DOUBLE_t improvement    # the improvement by selecting this feature
+    DOUBLE_t threshold      # for continuous feature only
+    SIZE_t pos              # for continuous feature
 
-    SIZE_t  n_subnodes
-    SIZE_t* n_subnodes_samples
-    DOUBLE_t* wn_subnodes_samples 
+    #SIZE_t  n_subnodes
+    #SIZE_t* n_subnodes_samples
+    #DOUBLE_t* wn_subnodes_samples 
 
 cdef class Splitter:
 
@@ -128,7 +136,16 @@ cdef class Splitter:
     cdef SIZE_t* features_win
     cdef SIZE_t  n_features
     
-    cdef DTYPE_t* feature_values    # .temp
+    cdef DTYPE_t* feature_values    # temp
+
+    cdef SplitRecord* records       # temp
+    cdef SIZE_t*  positions         # temp
+    cdef double*  improvements
+    cdef double*  weights           # temp
+
+    cdef SIZE_t*   n_sub_samples
+    cdef DOUBLE_t* wn_sub_samples
+
 
     cdef SIZE_t max_candid_features # reserved
 
@@ -141,12 +158,14 @@ cdef class Splitter:
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          DOUBLE_t* weighted_n_node_samples) # nogil
 
-    cdef void _choose_split_point(self, SplitRecord* best, DTYPE_t* Xf, DOUBLE_t impurity, DOUBLE_t epsilon) # nogil
+    cdef void _choose_split_point(self, SplitRecord* best, DTYPE_t* Xf, 
+                                    DOUBLE_t impurity, DOUBLE_t epsilon) # nogil
     cdef SIZE_t _choose_split_feature(self, 
                                 SplitRecord* records, 
                                 SIZE_t size, DOUBLE_t epsilon) # nogil
 
-    cdef SplitRecord* node_split(self,
+    cdef void node_split(self,
+                         SplitRecord* split_record,
                          SIZE_t* n_node_features, 
                          DOUBLE_t impurity,
                          SIZE_t  diffprivacy_mech,
