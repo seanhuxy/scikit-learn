@@ -20,8 +20,8 @@ cdef struct Feature:
     SIZE_t n_values # the number of distinct value of the feature
                     # for continuous feature, = 2  
 
-    DOUBLE_t max    # for continuous feature only
-    DOUBLE_t min    # for continuous feature only
+    #DOUBLE_t max    # for continuous feature only
+    #DOUBLE_t min    # for continuous feature only
 
 cdef struct Data:
     DTYPE_t* X
@@ -141,6 +141,7 @@ cdef class Splitter:
     cdef SplitRecord* records       # temp
     cdef SIZE_t*  positions         # temp
     cdef double*  improvements
+    cdef double*  improvements_exp  # only for exponential mech
     cdef double*  weights           # temp
 
     cdef SIZE_t*   n_sub_samples
@@ -280,5 +281,5 @@ cdef class Tree:
     cpdef np.ndarray compute_feature_importances(self, normalize=*)
 
     cdef void print_tree(self)
-    cdef void print_node(self, SIZE_t node_id, SIZE_t feature, SIZE_t index, SIZE_t depth)
+    cdef void print_node(self, SIZE_t node_id, Node* parent, SIZE_t feature, SIZE_t index, SIZE_t depth)
 

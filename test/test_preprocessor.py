@@ -22,13 +22,14 @@ def nbtree_test(
         meta,
 
         #discretize = False,
-        max_depth = 10,
-        diffprivacy_mech = "no",
-        budget =5., 
+        max_depth = 10 ,
+        diffprivacy_mech = "lap",
+        budget = 4., 
         criterion="gini", 
-        min_samples_leaf=0, 
+        max_candid_features = 70,
+        min_samples_leaf = 1,
         print_tree = False,
-        is_prune = False,
+        is_prune = True,
         debug = False,
         random_state = 1024):
 
@@ -37,36 +38,38 @@ def nbtree_test(
     print "budget\t\t", budget
     #print "discretize\t", discretize
     print "max_depth\t", max_depth
+    print "max_features\t", max_candid_features
     print "criterion\t", criterion
-    #print "print_tree\t", print_tree
     print "is prune\t", is_prune
+    #print "print_tree\t", print_tree
     #print "debug\t\t", debug
-    #print "random\t\t", random_state
 
     nbtree = NBTreeClassifier(
-                max_depth       =max_depth, 
-                diffprivacy_mech=diffprivacy_mech, 
-                criterion       =criterion, 
-                budget          =budget, 
-                print_tree      =print_tree, 
-                min_samples_leaf=min_samples_leaf,
+                max_depth       = max_depth, 
+                diffprivacy_mech= diffprivacy_mech, 
+                criterion       = criterion, 
+                budget          = budget, 
+                print_tree      = print_tree, 
+                max_candid_features = max_candid_features,
+                min_samples_leaf= min_samples_leaf,
                 is_prune        = is_prune,
                 random_state    = random_state,
                 debug   = debug)
 
     nbtree.set_meta(meta)
 
-    tree = DecisionTreeClassifier(max_depth=10)
+    tree = DecisionTreeClassifier(max_depth=max_depth)
 
     print "fitting..."
     t1 = time()
     #tree.fit(X,y)
+    #clf =tree
+
     nbtree = nbtree.fit(X, y )
+    clf = nbtree
+
     t2 = time()
     print "Time for fitting %.2fs"%(t2-t1)
-
-    #clf =tree
-    clf = nbtree
 
     y_true = y_test
     y_prob = clf.predict_proba(X_test)[:,-1]
@@ -84,12 +87,12 @@ def nbtree_test(
     print report
 
     print "Feature Importance:"
-    print "index\tfeature\tscore"
+    print "index\tfeature\t\tscore"
     feature_importances = clf.feature_importances_
     
     features = np.argsort(feature_importances)
     for i, f in enumerate(features):
-        print "[%d] %s %.3f"%(i, meta.features[f].name, feature_importances[f])
+        print "[%2d]\t%25s\t%.3f"%(i, meta.features[f].name, feature_importances[f])
     print "\n"
     
     # sort 
@@ -118,7 +121,7 @@ def nbtree_test(
     print "AUC:", auc
 
     print 'print the limited number result:'
-    print 'first\trecall\tpricsn\tf1_score\tauc'
+    print 'first\trecall\tpricsn\tf1\tauc'
     for i in [200,500,800,1100,1500]:
             sorted_y_pred = np.zeros(sorted_y_true.size)
             sorted_y_pred[0:i] = 1
@@ -133,8 +136,8 @@ def nbtree_test(
     print "\n"
 
     print 'print the threshold value result:'
-    print 'thresh\trecall\tprecsn\tf1_score\tauc'
-    for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+    print 'thresh\trecall\tprecsn\tf1\tauc'
+    for t in [0.1, 0.3, 0.5, 0.7, 0.9]:
             y_pred = np.zeros( y_true.size)
             y_pred[np.where( y_prob >= t)] = 1
 
@@ -152,31 +155,29 @@ def preprocess():
     feature_in     = os.path.join(cwd, "dataset/feature.in")
     feature_out    = os.path.join(cwd, "dataset/feature.out")
 
-    #train_data_in  = os.path.join(cwd, "dataset/data.npy")
+    #train_data_in  = os.path.join(cwd, "dataset/0506/05_cln.npy")
     train_data_in  = os.path.join(cwd, "dataset/adult.data")
-    train_data_out = os.path.join(cwd, "dataset/data.out")
+    train_data_out = os.path.join(cwd, "dataset/data.out.npy")
 
-    test_data_in   = os.path.join(cwd, "dataset/adult.data")
-    #test_data_in   = os.path.join(cwd, "dataset/data.npy")
-    test_data_out  = os.path.join(cwd, "dataset/data.out")
+    #test_data_in   = os.path.join(cwd, "dataset/0506/06_cln.npy")
+    test_data_in   = os.path.join(cwd, "dataset/adult.test")
+    test_data_out  = os.path.join(cwd, "dataset/test.out.npy")
 
     #test_data_in = None
 
     preprocessor = Preprocessor()
     if is_load_from_raw:
         preprocessor.load( feature_in, train_data_in, test_data_in, sep=" ", 
-                            is_discretize= False, nbins=10)
+                            is_discretize= True, nbins=10)
 
         preprocessor.export( feature_out, train_data_out, test_data_out)
 
     else:
         preprocessor.load_existed(feature_out, train_data_out, test_data_out)
 
-    print "end preprocess" 
     return preprocessor
 
 if __name__ == "__main__":
-
 
     preprocessor = preprocess()
     #exit()
@@ -185,7 +186,7 @@ if __name__ == "__main__":
     test  = preprocessor.get_test()
 
     X,      y      = train[:,:-1], train[:,-1]
-    X_test, y_test = test[:,:-1], test[:,-1]
+    X_test, y_test = test[:,:-1],  test[:,-1]
 
     y = np.ascontiguousarray(y)
     y_test = np.ascontiguousarray(y_test)

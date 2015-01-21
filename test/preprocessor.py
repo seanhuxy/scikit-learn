@@ -324,8 +324,6 @@ class Preprocessor:
         t2 = time()
         print "%.2f"%(t2-t1)
 
-        print "finished export"
-
         return self
 
     def load_arff(self, arff_file, train_to_test = "9:1"):
@@ -484,10 +482,11 @@ class Preprocessor:
 
         #print data
 
-        print "parsing from data..."
+        td0 = time()  
+        print "parsing from data...",
         for i in range(n_features):
             f = features[i]
-            #print "[%d] f: %s, type %d"%(i, f.name, f.type)
+            t0 = time()
 
             values = data[:, i]
 
@@ -495,19 +494,25 @@ class Preprocessor:
 
             if f.type is FEATURE_CONTINUOUS and self.is_discretize:
                 t1 = time()
+
+                values = values.astype(float) #XXX
+                #print values
+
                 f.discretize( values, self.nbins, self.dmethod)
                 t2 = time()
                 print "discretize takes  %.2fs"%(t2-t1)
 
-            if f.type is FEATURE_CONTINUOUS:
-                continue
-            else:
+            if f.type is FEATURE_DISCRET:
                 values =  f.transfer( values )
                 data[:,i] = values
 
+            t3 = time()
+            #print "[%2d] %25s, t=%d %.2fs"%(i, f.name, f.type, t0-t3)
+
+        td1 = time()
+        print "%.2fs"%(td1-td0)
+
         data = data.astype("float") # for dataset read from cvs
-        #print data.dtype
-        #print data
 
         if test_data_file is not None:
             self.n_test_samples = n_test_samples
