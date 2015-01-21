@@ -176,7 +176,6 @@ cdef class Criterion:
             for k in range(n_outputs):
                 c = <SIZE_t> data.y[ i*data.y_stride + k]    # y[i,k] 
                 label_count_total[k * label_count_stride + c] += w # label_count_total[k,c] 
-
             weighted_n_node_samples += w
 
         if debug:
@@ -394,18 +393,9 @@ cdef class Criterion:
             
             label_count += self.feature_stride 
 
-        cdef SIZE_t k, c
-        cdef SIZE_t n_outputs = self.data.n_outputs
-        if debug:
-            printf("\n\t\tsum ")
-            for k in range(n_outputs):
-                for c in range( self.data.n_classes[k]):
-                    printf("%6.1f  ", self.label_count_total[ k* self.label_count_stride + c])
-            printf("\n")
-
-
         if 0:
-            printf("impurity-improvement: %f-%f=%f\n",impurity, improvement, impurity-improvement)
+            printf("impurity-improvement: %f-%f=%f\n",
+                    impurity, improvement, impurity-improvement)
 
         if improvement < 0.0:
             printf("improvement(): Error, improvement %f is less than 0\n",improvement) 
@@ -599,7 +589,7 @@ cdef class LapEntropy(Entropy):
 
         cdef bint debug = 0
         if debug:
-            printf("LapEntropy.impurity: wn_samples is %f, epsilon is %f\n", 
+            printf("LapEntropy.impurity: wn_samples=%.2f, e=%.3f\n", 
                     wn_samples, epsilon)
 
         cdef UINT32_t* rand = &self.rand_r_state
@@ -631,7 +621,7 @@ cdef class LapEntropy(Entropy):
                     count = wn_samples
                 
                 sub      = count / wn_samples
-                entropy -= count * log2(sub)    #XXX
+                entropy  =-count * log2(sub)    #XXX
 
             total += entropy 
            
@@ -639,16 +629,20 @@ cdef class LapEntropy(Entropy):
                 printf("entropy %f\n", entropy)
 
             label_count += label_count_stride 
+
+        if total < 0.0:
+            printf("Lap Entropy impurity %f should >= 0", total)
+            exit(1)
         
         return total/n_outputs 
 
     # Laplace Entropy
-    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_subnodes_samples, SIZE_t n_subnodes,
+    cdef DOUBLE_t improvement(self, DOUBLE_t* wn_sub_samples, SIZE_t n_subnodes,
                             DOUBLE_t impurity, DOUBLE_t epsilon) : #nogil:
         ''' calculate improvement based on class distribution'''
         cdef DOUBLE_t* label_count = self.label_count
-        cdef DOUBLE_t improvement = 0.0
-        cdef DOUBLE_t epsilon_per_action = epsilon/2.0  # one for noise(wn_subnodes_samples) 
+        cdef DOUBLE_t  improvement = 0.0
+        cdef DOUBLE_t  epsilon_per_action = epsilon/2.0  # one for noise(wn_sub_samples) 
                                                         # one for noise(count) 
         cdef bint debug = 0
         if label_count == NULL:
@@ -656,11 +650,12 @@ cdef class LapEntropy(Entropy):
             exit(1)
 
         # sum up children_impurity of each subset 
-        cdef SIZE_t i = 0
+        cdef SIZE_t i
         cdef DOUBLE_t sub = 0.0
         for i in range(n_subnodes):
-            sub = self.children_impurity(label_count, wn_subnodes_samples[i], epsilon_per_action)
-            # sub = sub/self.weighted_n_node_samples
+            sub = self.children_impurity(label_count, wn_sub_samples[i], 
+                                            epsilon_per_action)
+
             improvement += sub
            
             if debug:
@@ -678,7 +673,6 @@ cdef class LapEntropy(Entropy):
             printf("LapEntropy: improvement is %f\n", improvement)
         
         return improvement
-
 
 # ===========================================================
 # Splitter 
@@ -838,13 +832,13 @@ cdef class Splitter:
                 best feature for split,
                 best split point (for continuous feature)  '''
        
-        cdef Data* data = self.data
-        cdef SIZE_t max_n_feature_values = data.max_n_feature_values
-
         cdef UINT32_t* rand = &self.rand_r_state
-        cdef SIZE_t max_candid_features = self.max_candid_features
+
+        cdef Data* data = self.data
+        cdef Feature* feature
+        cdef SIZE_t max_n_feature_values = data.max_n_feature_values
+        cdef SIZE_t max_candid_features  = self.max_candid_features
         
-        # create and init split records
         cdef SIZE_t n_node_features = ptr_n_node_features[0]
 
         _init_split(best)
@@ -859,9 +853,8 @@ cdef class Splitter:
         cdef DOUBLE_t best_improvement = -INFINITY
         cdef SIZE_t   best_i = -1
 
-        cdef SIZE_t* samples_win = self.samples_win
-        cdef Feature* feature
-        cdef SIZE_t* features_win = self.features_win 
+        cdef SIZE_t*  samples_win = self.samples_win
+        cdef SIZE_t*  features_win = self.features_win 
         cdef SIZE_t p = 0
 
         cdef DTYPE_t* Xf  = self.feature_values
@@ -880,20 +873,8 @@ cdef class Splitter:
         else:
             epsilon_per_feature = NO_DIFF_PRIVACY_BUDGET
 
-        if debug:
-            printf("before shuffle:\n")
-            for i in range(n_node_features):
-                printf("%u, ",features_win[i])
-            printf("\n")
-
         # shuffle feature_win from 0 to n_node_features
         shuffle( features_win, n_node_features, rand)
-
-        if debug:
-            printf("after shuffle:\n")
-            for i in range(n_node_features):
-                printf("%u, ",features_win[i])
-            printf("\n")
 
         if 0:
             printf("\nnode_split(): N=%d (%d-%d)\n", end-start, start, end)
@@ -914,14 +895,12 @@ cdef class Splitter:
         cdef SIZE_t f_j = 0
         cdef SIZE_t f_i = n_node_features
 
-
         # [     : f_v ) : features that has been visited but not constant
         # [ f_v : f_i ) : features that are waiting to be visited 
         #    f_j is sampled randomely from this interval
         # [ f_i : n_node_features ): constant features found in this node
 
         while f_v < f_i and visited_cnt < max_candid_features : 
-        #while f_j < n_node_features :
 
             visited_cnt += 1    
 
@@ -948,17 +927,14 @@ cdef class Splitter:
                             features_win[f_j], start, Xf[start], end-1, Xf[end-1])
 
                 f_i -= 1
-                # switch f_j and f_i 
+                # f_j <==> f_i 
                 features_win[f_j], features_win[f_i] = features_win[f_i], features_win[f_j]
-                #tmp               = features_win[f_j] 
-                #features_win[f_j] = features_win[f_i]
-                #features_win[f_i] = tmp
 
                 # goes to next candidate feature
 
             # not constant feature
             else:                
-                feature = &data.features[ features_win[f_j] ]
+                feature    = &data.features[ features_win[f_j] ]
                 n_subnodes = feature.n_values
 
                 current = &records[f_j]
@@ -969,9 +945,6 @@ cdef class Splitter:
                      
                 # if continuous feature
                 if feature.type == FEATURE_CONTINUOUS:
-                    if 0:
-                        printf("node_split(): continuous f[%u],begin to choose spoint\n", 
-                                current.feature_index )
 
                     if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
                         printf("node_split(): Laplace Mech does not support continuous feature\n")
@@ -1000,7 +973,7 @@ cdef class Splitter:
                                                 wn_sub_samples,
                                                 n_subnodes,
                                                 impurity, 
-                                                epsilon_per_feature)  # XXX only for laplace mech
+                                                epsilon_per_feature)  # only for laplace mech
 
                 if debug:
                     printf("f: %2u %s\t", features_win[f_j], feature.name)
@@ -1015,12 +988,10 @@ cdef class Splitter:
                             self.criterion.label_count[i* self.criterion.feature_stride],
                             self.criterion.label_count[i* self.criterion.feature_stride + 1])
 
-                # switch f_v and f_j
+                # f_v <==> f_j
                 #features_win[f_v], features_win[f_j] = features_win[f_j] features_win[f_v]
-                #tmp               = features_win[f_j] 
-                #features_win[f_j] = features_win[f_v]
-                #features_win[f_v] = tmp
 
+                # f_v <==> f_j
                 #records[f_v], records[f_j] = records[f_j], records[f_v]
                 #current = &records[f_v]
 
@@ -1077,16 +1048,13 @@ cdef class Splitter:
         best.threshold      = records[best_i].threshold
         best.pos            = records[best_i].pos
                
-        # switch best_i and f_i-1 in features_win
+        # best_i <==> f_i-1 in features_win
         features_win[best_i], features_win[f_i-1] \
                             = features_win[f_i-1], features_win[best_i]
-        #tmp                  = features_win[best_i]
-        #features_win[best_i] = features_win[f_i-1]
-        #features_win[f_i-1]  = tmp
 
         # sort Xf based on best feature
         for p in range(start, end):
-            # Xf[p] = X[sample_index, feature_index]
+            # Xf[p] <== X[sample_index, feature_index]
             Xf[p] = data.X [     
                     samples_win[p]     * data.X_sample_stride  
                  +  best.feature_index * data.X_feature_stride ]
@@ -1106,10 +1074,8 @@ cdef class Splitter:
 
         if debug:
             printf("\t selected [%d] f[%u, %s] = %f\n", 
-                    f_i-1, 
-                    best.feature_index, 
-                    feature.name,
-                    best.improvement)
+                    f_i-1, best.feature_index, 
+                    feature.name, best.improvement)
  
         if feature.type == FEATURE_CONTINUOUS:
             ptr_n_node_features[0] = f_i
@@ -1133,9 +1099,8 @@ cdef class LapSplitter(Splitter):
                 DOUBLE_t impurity, 
                 DOUBLE_t epsilon):# nogil:
         
-        if 1:
-        # with gil:
-            raise("Laplace mech doesn't support continuous feature") 
+        printf("Laplace mech doesn't support continuous feature") 
+        exit(1)
         
     # choose the best
     cdef SIZE_t _choose_split_feature(self,
@@ -1508,15 +1473,14 @@ cdef class NBTreeBuilder:
         # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
         cdef SIZE_t max_candid_features = self.max_candid_features
-
         cdef SIZE_t min_samples_leaf =  self.min_samples_leaf
         if min_samples_leaf <= 0:
             min_samples_leaf = data.avg_n_feature_values
         if debug:
             printf("min_samples_leaf=%d\n", min_samples_leaf)
 
-        cdef bint print_tree = self.print_tree
         cdef bint is_prune = self.is_prune
+        cdef bint print_tree = self.print_tree
 
         # Initial capacity of tree
         cdef SIZE_t init_capacity
@@ -1529,11 +1493,11 @@ cdef class NBTreeBuilder:
         self.tree = tree
 
         # set parameter for diffprivacy
-        cdef DOUBLE_t budget = self.budget
-        cdef SIZE_t diffprivacy_mech = self.diffprivacy_mech
+        cdef DOUBLE_t budget            = self.budget
+        cdef SIZE_t   diffprivacy_mech  = self.diffprivacy_mech
         cdef DOUBLE_t epsilon_per_depth = 0.0
         cdef DOUBLE_t epsilon_per_action= 0.0   
-        if diffprivacy_mech is LAP_DIFF_PRIVACY_MECH:
+        if diffprivacy_mech   is LAP_DIFF_PRIVACY_MECH:
             epsilon_per_depth  = budget/(max_depth+1)
             epsilon_per_action = epsilon_per_depth/2.0
         elif diffprivacy_mech is EXP_DIFF_RPIVACY_MECH:
@@ -1592,184 +1556,170 @@ cdef class NBTreeBuilder:
         if rc == -1:
             raise MemoryError()
 
-        if 1: # placeholder for with nogil
-            while not stack.is_empty():
+        #if 1: # placeholder for with nogil
+        while not stack.is_empty():
 
-                stack.pop(&stack_record)
-                start = stack_record.start
-                end   = stack_record.end
-                depth = stack_record.depth
-                parent= stack_record.parent
-                index = stack_record.index
-                n_node_features = stack_record.n_node_features 
+            stack.pop(&stack_record)
+            start = stack_record.start
+            end   = stack_record.end
+            depth = stack_record.depth
+            parent= stack_record.parent
+            index = stack_record.index
+            n_node_features = stack_record.n_node_features 
 
-                n_node_samples = end - start
+            n_node_samples = end - start
+            
+            # reset class distribution based on this node
+            splitter.node_reset(start, end, &weighted_n_node_samples)
+
+            is_leaf = (depth >= max_depth or n_node_features <= 0)
+
+            if epsilon_per_action > 0.0:
                 
-                # reset class distribution based on this node
-                splitter.node_reset(start, end, &weighted_n_node_samples)
+                noise_n_node_samples = <DOUBLE_t> n_node_samples \
+                                     + noise(epsilon_per_action, rand)
 
-                is_leaf = (depth >= max_depth or n_node_features <= 0)
+                if noise_n_node_samples < 0.0:
+                    noise_n_node_samples = 0.0
 
+                max_n_feature_values = splitter.node_max_n_feature_values(n_node_features) 
+
+                if 0:
+                    printf("(noise) N=%.2f, maxNum feature_values %u, max_Num_classes %u\n",
+                            noise_n_node_samples, max_n_feature_values, data.max_n_classes)
+
+                is_leaf = is_leaf or not is_enough_samples( noise_n_node_samples, 
+                                                            max_n_feature_values, 
+                                                            data.max_n_classes, 
+                                                            epsilon_per_action, 
+                                                            debug)
+
+            else:
+                noise_n_node_samples = <DOUBLE_t> n_node_samples 
+                is_leaf = ( is_leaf or 
+                           (n_node_samples < 2 * min_samples_leaf ) )
+
+            # compute node impurity
+            impurity = splitter.node_impurity()
+            is_leaf = is_leaf or (impurity <= MIN_IMPURITY_SPLIT)
+
+            if not is_leaf:
+                # with gil:
+                splitter.node_split(&split_record, 
+                                    &n_node_features, 
+                                    impurity, 
+                                    diffprivacy_mech,  
+                                    epsilon_per_action )
+
+                is_leaf = is_leaf or (split_record.feature_index < 0)
+
+                # no improvement will be made if split this node, so let it be a leaf
+                #if split_record.improvement <= 0.0:
+                #    is_leaf = True
+                #    if debug:
+                #        printf("cancel to split in f[%d]\n",split_record.feature_index)
+
+            feature = &data.features[split_record.feature_index]
+            if is_leaf:
+                
+                # leaf Tree
+                node_id = tree._add_node(
+                        parent,
+                        index,
+                        1,                       # leaf node
+                        NO_FEATURE,
+                        NO_THRESHOLD,
+                        0,                       # no children
+                        0,                       # improvement = 0
+                        n_node_samples,
+                        weighted_n_node_samples, # xxx
+                        noise_n_node_samples
+                        )
+
+                # store class distribution into node.values
+                splitter.node_value(tree.value + node_id * tree.value_stride)
+
+                # add noise to the class distribution
                 if epsilon_per_action > 0.0:
-                    
-                    noise_n_node_samples = <DOUBLE_t> n_node_samples \
-                                         + noise(epsilon_per_action, rand)
+                    noise_distribution( epsilon_per_action, 
+                                        tree.value + node_id * tree.value_stride, 
+                                        data, 
+                                        rand)
+                
+                if debug and print_tree and node_id != 0:
+                    for pad in range(depth):
+                        printf(" | ")
+                    printf("f[%2u,%s]=%2u n=%3u\t", 
+                            tree.nodes[parent].feature, 
+                            data.features[ tree.nodes[parent].feature ].name,
+                            index, 
+                            n_node_samples)
 
-                    if noise_n_node_samples < 0.:
-                        noise_n_node_samples = 0.
+                    splitter.criterion.print_distribution(NULL)
+                    printf("\t\t")
+                    splitter.criterion.print_distribution(tree.value+node_id*tree.value_stride)
+                    printf("\n",n_node_samples)
+            else:
 
-                    #is_leaf = ( is_leaf or 
-                    #           (n_node_samples < 2 * min_samples_leaf ) )
-
-
-                    if 1:
-                        max_n_feature_values = splitter.node_max_n_feature_values( n_node_features ) 
-
-                        if 0:
-                            printf("(noise) N=%.2f, maxNum feature_values %u, max_Num_classes %u\n",
-                                    noise_n_node_samples, max_n_feature_values, data.max_n_classes)
-
-                        is_leaf = is_leaf or not is_enough_samples( noise_n_node_samples, 
-                                                                    max_n_feature_values, 
-                                                                    data.max_n_classes, 
-                                                                    epsilon_per_action, 
-                                                                    debug)
-
-                else:
-                    noise_n_node_samples = <DOUBLE_t> n_node_samples 
-                    is_leaf = ( is_leaf or 
-                               (n_node_samples < 2 * min_samples_leaf ) )
-
-                # compute node impurity
-                impurity = splitter.node_impurity()
-
-                #if is_leaf is False and (impurity <= MIN_IMPURITY_SPLIT):
-                #    print "turn to leaf because of small impurity"
-
-                is_leaf = is_leaf or (impurity <= MIN_IMPURITY_SPLIT)
-
-                if not is_leaf:
-                    # with gil:
-                    splitter.node_split(&split_record, 
-                                        &n_node_features, 
-                                        impurity, 
-                                        diffprivacy_mech,  
-                                        epsilon_per_action )
-
-                    is_leaf = is_leaf or (split_record.feature_index < 0)
-
-                    # XXX no improvement will be made if split this node, so let it be a leaf
-                    #if split_record.improvement <= 0.0:
-                    #    is_leaf = True
-                    #    if debug:
-                    #        printf("cancel to split in f[%d]\n",split_record.feature_index)
-
-                feature = &data.features[split_record.feature_index]
-                if is_leaf:
-                    
-                    # leaf Tree
-                    node_id = tree._add_node(
-                            parent,
-                            index,
-                            1,                       # leaf node
-                            NO_FEATURE,
-                            NO_THRESHOLD,
-                            0,                       # no children
-                            0,                       # improvement = 0
-                            n_node_samples,
-                            weighted_n_node_samples, # xxx
-                            noise_n_node_samples
-                            )
-
-                    # store class distribution into node.values
-                    splitter.node_value(tree.value + node_id * tree.value_stride)
-
-                    # add noise to the class distribution
-                    if epsilon_per_action > 0.0:
-                        noise_distribution( epsilon_per_action, 
-                                            tree.value + node_id * tree.value_stride, 
-                                            data, 
-                                            rand)
-                    
-                    if debug and print_tree and node_id != 0:
+                node_id = tree._add_node(
+                        parent,
+                        index,
+                        0,                        # not leaf node
+                        split_record.feature_index,
+                        split_record.threshold,
+                        feature.n_values,         # number of children
+                        split_record.improvement, # improvement
+                        n_node_samples, 
+                        weighted_n_node_samples,  # xxx
+                        noise_n_node_samples
+                        )
+                
+                if debug and print_tree:
+                    if node_id != 0: 
                         for pad in range(depth):
                             printf(" | ")
-                        printf("f[%2u,%s]=%2u n=%3u\t", 
+                        printf("f[%u, %s]=%u n=%u\n", 
                                 tree.nodes[parent].feature, 
-                                data.features[ tree.nodes[parent].feature ].name,
+                                data.features[ tree.nodes[parent].feature].name, 
                                 index, 
                                 n_node_samples)
 
-                        splitter.criterion.print_distribution(NULL)
-                        printf("\t\t")
-                        splitter.criterion.print_distribution(tree.value+node_id*tree.value_stride)
-                        printf("\n",n_node_samples)
-                else:
-
-                    node_id = tree._add_node(
-                            parent,
-                            index,
-                            0,                        # not leaf node
-                            split_record.feature_index,
-                            split_record.threshold,
-                            feature.n_values,         # number of children
-                            split_record.improvement, # improvement
-                            n_node_samples, 
-                            weighted_n_node_samples,  # XXX
-                            noise_n_node_samples
-                            )
+                # push children into stack
+                start_i = start
+                end_i   = start
+                for index in range( feature.n_values):
+                    start_i = end_i
+                    end_i   = end_i + splitter.n_sub_samples[index]
                     
-                    if debug and print_tree:
-                        if node_id != 0: 
-                            for pad in range(depth):
-                                printf(" | ")
-                            printf("f[%u, %s]=%u n=%u\n", 
-                                    tree.nodes[parent].feature, 
-                                    data.features[ tree.nodes[parent].feature].name, 
-                                    index, 
-                                    n_node_samples)
+                    rc = stack.push(
+                        start_i,    # start pos
+                        end_i,      # end pos
+                        depth+1,    # depth of this new node
+                        node_id,    # child's parent id
+                        index,      # the index
+                        n_node_features )
 
-                    # push children into stack
-                    start_i = start
-                    end_i   = start
-                    for index in range( feature.n_values):
-                        start_i = end_i
-                        end_i   = end_i + splitter.n_sub_samples[index]
-                        
-                        rc = stack.push(
-                            start_i,    # start pos
-                            end_i,      # end pos
-                            depth+1,    # depth of this new node
-                            node_id,    # child's parent id
-                            index,      # the index
-                            n_node_features 
-                            )
+                    if 0:
+                        printf("\tChild[%u] from %u to %u, left %u features\n",
+                            index, start_i, end_i, n_node_features)
 
-                        if 0:
-                            printf("\tChild[%u] from %u to %u, left %u features\n",
-                                index, start_i, end_i, n_node_features)
+                    if rc == -1:
+                        printf(" Error: stack.push failed\n")
+                        break
 
-                        if rc == -1:
-                            printf(" Error: stack.push failed\n")
-                            break
+                if end_i != end:
+                    printf("Error: end_i %u should be equals to end %u\n", end_i, end)
+                    printf("start %u\n",start)
+                    exit(1)
+                
+            if depth > max_depth_seen:
+                max_depth_seen = depth
 
-                    if end_i != end:
-                        printf("Error: end_i %u should be equals to end %u\n", end_i, end)
-                        printf("start %u\n",start)
-                        exit(1)
-                    
-                    #free(split_record.n_subnodes_samples)
-                    #free(split_record.wn_subnodes_samples)
-                    #free(split_record)
+        if rc >= 0:
+            rc = tree._resize_c(tree.node_count)
 
-                if depth > max_depth_seen:
-                    max_depth_seen = depth
-
-            if rc >= 0:
-                rc = tree._resize_c(tree.node_count)
-
-            if rc >= 0:
-                tree.max_depth = max_depth_seen
+        if rc >= 0:
+            tree.max_depth = max_depth_seen
         
         if rc == -1:
             raise MemoryError()

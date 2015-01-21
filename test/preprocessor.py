@@ -495,7 +495,7 @@ class Preprocessor:
             if f.type is FEATURE_CONTINUOUS and self.is_discretize:
                 t1 = time()
 
-                values = values.astype(float) #XXX
+                #values = values.astype(float) #XXX
                 #print values
 
                 f.discretize( values, self.nbins, self.dmethod)
@@ -534,20 +534,20 @@ class Preprocessor:
 
         features = self._load_features( feature_file )
 
-        print "load train data...",
+        #print "load train data...",
         t1 = time()
         train_data = np.load(train_data_file)
         t2 = time()
-        print "%.2f"%(t2-t1)
+        #print "%.2f"%(t2-t1)
         
         n_train_samples = train_data.shape[0]
         n_features      = train_data.shape[1]
 
-        print "load test data...",
+        #print "load test data...",
         t1 = time()
         test_data  = np.load(test_data_file)
         t2 = time()
-        print "%.2f"%(t2-t1)
+        #print "%.2f"%(t2-t1)
 
         n_test_samples  = test_data.shape[0]
         data = np.concatenate((train_data, test_data), axis=0)

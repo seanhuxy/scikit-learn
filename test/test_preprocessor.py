@@ -22,10 +22,10 @@ def nbtree_test(
         meta,
 
         #discretize = False,
-        max_depth = 10 ,
-        diffprivacy_mech = "lap",
-        budget = 4., 
-        criterion="gini", 
+        max_depth        = 10 ,
+        diffprivacy_mech = "no",
+        budget           = 5, 
+        criterion        = "entropy", 
         max_candid_features = 70,
         min_samples_leaf = 1,
         print_tree = False,
@@ -38,7 +38,7 @@ def nbtree_test(
     print "budget\t\t", budget
     #print "discretize\t", discretize
     print "max_depth\t", max_depth
-    print "max_features\t", max_candid_features
+    print "max_ftures\t", max_candid_features
     print "criterion\t", criterion
     print "is prune\t", is_prune
     #print "print_tree\t", print_tree
@@ -60,7 +60,7 @@ def nbtree_test(
 
     tree = DecisionTreeClassifier(max_depth=max_depth)
 
-    print "fitting..."
+    print "fitting...",
     t1 = time()
     #tree.fit(X,y)
     #clf =tree
@@ -69,7 +69,7 @@ def nbtree_test(
     clf = nbtree
 
     t2 = time()
-    print "Time for fitting %.2fs"%(t2-t1)
+    print "%.2fs"%(t2-t1)
 
     y_true = y_test
     y_prob = clf.predict_proba(X_test)[:,-1]
@@ -86,14 +86,15 @@ def nbtree_test(
     print "Report:"
     print report
 
-    print "Feature Importance:"
-    print "index\tfeature\t\tscore"
-    feature_importances = clf.feature_importances_
-    
-    features = np.argsort(feature_importances)
-    for i, f in enumerate(features):
-        print "[%2d]\t%25s\t%.3f"%(i, meta.features[f].name, feature_importances[f])
-    print "\n"
+    if 0:
+        print "Feature Importance:"
+        print "index\tfeature\t\tscore"
+        feature_importances = clf.feature_importances_
+        
+        features = np.argsort(feature_importances)
+        for i, f in enumerate(features):
+            print "[%2d]\t%25s\t%.3f"%(i, meta.features[f].name, feature_importances[f])
+        print "\n"
     
     # sort 
     sorted_indices = np.argsort(- y_prob)
@@ -106,42 +107,35 @@ def nbtree_test(
 #    for i, thresh in enumerate(threshs):
 #        print "%.2f\t%.2f\t%.2f"%(thresh, fpr[i], tpr[i])
 
-    if False:
-        from matplotlib import pyplot as plt 
-
-        plt.plot( fpr, tpr)
-        plt.ylabel("True Positive Rate")
-        plt.xlabel("False Positive Rate")
-        plt.show()
-
-    #print y_true
-    #print y_prob
-
     auc = metrics.roc_auc_score( y_true, y_prob)
     print "AUC:", auc
 
+    n_samples  = X.shape[0]
+    first_list = [] 
+    for i in range(1,10):
+        first_list.append( i * (n_samples // 10) )
+
     print 'print the limited number result:'
-    print 'first\trecall\tpricsn\tf1\tauc'
-    for i in [200,500,800,1100,1500]:
+    print 'first\trecall\tpricsn\tf1  \tauc'
+    for i in first_list:
             sorted_y_pred = np.zeros(sorted_y_true.size)
             sorted_y_pred[0:i] = 1
 
-            #auc       = metrics.roc_auc_score(  sorted_y_true, sorted_y_prob)
             recall    = metrics.recall_score(   sorted_y_true, sorted_y_pred, average='micro')
             precision = metrics.precision_score(sorted_y_true, sorted_y_pred, average='micro')
             #f1_score = f1_score(test_label, predict2, average='micro')
             f1_score=2*precision*recall/(precision+recall)
 
-            print('[%d]\t%.3f\t%.3f\t%.3f\t%.3f'%(i, recall, precision, f1_score, auc))
+            print('[%3dK]\t%.3f\t%.3f\t%.3f\t%.3f'%(
+                        i//1000, recall, precision, f1_score, auc))
     print "\n"
 
     print 'print the threshold value result:'
-    print 'thresh\trecall\tprecsn\tf1\tauc'
+    print 'thresh\trecall\tprecsn\tf1  \tauc'
     for t in [0.1, 0.3, 0.5, 0.7, 0.9]:
             y_pred = np.zeros( y_true.size)
             y_pred[np.where( y_prob >= t)] = 1
 
-            #auc       = metrics.roc_auc_score(  y_true, y_prob)
             recall    = metrics.recall_score(   y_true, y_pred, average='micro')
             precision = metrics.precision_score(y_true, y_pred, average='micro')
             #f1_score = f1_score(y_true, predict2, average='micro')
@@ -150,25 +144,25 @@ def nbtree_test(
 
 
 def preprocess():
-    is_load_from_raw = True
+    is_load_from_raw = False
 
     feature_in     = os.path.join(cwd, "dataset/feature.in")
-    feature_out    = os.path.join(cwd, "dataset/feature.out")
+    feature_out    = os.path.join(cwd, "dataset/feature_c.out") #XXX
 
-    #train_data_in  = os.path.join(cwd, "dataset/0506/05_cln.npy")
-    train_data_in  = os.path.join(cwd, "dataset/adult.data")
-    train_data_out = os.path.join(cwd, "dataset/data.out.npy")
+    train_data_in  = os.path.join(cwd, "dataset/0506/05_cln.npy")
+    #train_data_in  = os.path.join(cwd, "dataset/adult.data")
+    train_data_out = os.path.join(cwd, "dataset/data_c.out.npy")
 
-    #test_data_in   = os.path.join(cwd, "dataset/0506/06_cln.npy")
-    test_data_in   = os.path.join(cwd, "dataset/adult.test")
-    test_data_out  = os.path.join(cwd, "dataset/test.out.npy")
+    test_data_in   = os.path.join(cwd, "dataset/0506/06_cln.npy")
+    #test_data_in   = os.path.join(cwd, "dataset/data.npy")
+    test_data_out  = os.path.join(cwd, "dataset/test_c.out.npy")
 
     #test_data_in = None
 
     preprocessor = Preprocessor()
     if is_load_from_raw:
         preprocessor.load( feature_in, train_data_in, test_data_in, sep=" ", 
-                            is_discretize= True, nbins=10)
+                            is_discretize= False, nbins=10)
 
         preprocessor.export( feature_out, train_data_out, test_data_out)
 
@@ -186,7 +180,7 @@ if __name__ == "__main__":
     test  = preprocessor.get_test()
 
     X,      y      = train[:,:-1], train[:,-1]
-    X_test, y_test = test[:,:-1],  test[:,-1]
+    X_test, y_test = test[:,:-1], test[:,-1]
 
     y = np.ascontiguousarray(y)
     y_test = np.ascontiguousarray(y_test)

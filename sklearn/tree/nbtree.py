@@ -179,8 +179,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         tree = Tree(dataobject, debug)
         self._tree = tree
 
-        print "# ====================================="
-        print "# b={0}, d={1}, prune={2}, CF={3}".format(budget, max_depth, self.is_prune, self.CF)
+        #print "# ====================================="
+        #print "# b={0}, d={1}, prune={2}, CF={3}".format(budget, max_depth, self.is_prune, self.CF)
         builder = NBTreeBuilder(diffprivacy_mech,
                               budget,
                               splitter,
@@ -196,7 +196,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         # 4. build tree
         builder.build( tree, dataobject, debug)
         
-        print "# ====================================="
+        #print "# ====================================="
 
         self.data = dataobject 
         if self.data.n_outputs == 1:
