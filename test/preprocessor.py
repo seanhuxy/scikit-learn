@@ -217,6 +217,8 @@ class Feature:
 
         return ret
 
+    def __repr__(self):
+        return 'Feature(%s)'%str(self)
 
 class Preprocessor:
 
@@ -249,6 +251,10 @@ class Preprocessor:
         data = self.data[:n_train_samples,:]
         return data
 
+    def get_train_X_y(self):
+        train = self.get_train()
+        return train[:,:-1], train[:, -1]
+
     def get_test(self):
         self.check_load()
 
@@ -258,9 +264,28 @@ class Preprocessor:
         data = self.data[n_train_samples : n_train_samples+n_test_samples, : ]
         return data
 
+    def get_test_X_y(self):
+        test = self.get_test()
+        return test[:,:-1], test[:,-1]
+ 
     def get_features(self):
         self.check_load()
         return self.features
+
+    def get_first_nsf(self, n_samples, n_features, feature_importances):
+       
+        features = self.features[ feature_importances[ : n_features] ]
+
+        train = self.get_train()
+
+        X = train[ : n_samples, feature_importances[ : n_features]]
+        y = train[ : n_samples, -1]
+
+        test = self.get_test()
+        X_test = test[ : , feature_importances[ : n_features]]
+        y_test = test[ : , -1]
+
+        return X, y, X_test, y_test, features
 
     # legacy
     def discretize(self, nbins = 10, method = "cluster"):
@@ -415,6 +440,8 @@ class Preprocessor:
 
                 features.append(feature)
 
+        features = np.array(features) #XXX
+
         return features
 
     def _load_data(self, features, data_file, sep=" "):
@@ -423,15 +450,10 @@ class Preprocessor:
        
             the number of columns should equals to the number of features in feature_file
         '''
-        #data = np.loadtxt( data_file )
-        #if data.ndim != 2:
-        #    raise Exception, "data is not 2-dimension array"
-
         names = [ f.name for f in features]
         d = pd.read_csv( data_file, names=names, sep=sep, header=None) # separators XXX
     
         data = np.array(d)
-        #print data
 
         n_samples, n_features = data.shape[0], data.shape[1]
         if n_features != len(features):
@@ -495,7 +517,7 @@ class Preprocessor:
             if f.type is FEATURE_CONTINUOUS and self.is_discretize:
                 t1 = time()
 
-                #values = values.astype(float) #XXX
+                values = values.astype(float) #XXX
                 #print values
 
                 f.discretize( values, self.nbins, self.dmethod)

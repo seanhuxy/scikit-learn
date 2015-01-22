@@ -186,7 +186,7 @@ if __name__ == "__main__":
     y_test = np.ascontiguousarray(y_test)
 
     t1 = time()
-    nbtree_test(X, y, X_test, y_test, preprocessor)
+    nbtree_test(X, y, X_test, y_test, preprocessor.features)
     t2 = time()
     print "Time costs %.2fs"%(t2-t1)
 
