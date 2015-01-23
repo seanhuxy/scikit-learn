@@ -37,7 +37,7 @@ def nbtree_test(
         diffprivacy_mech = "lap",
         budget           = 0.1, 
         criterion        = "entropy", 
-        max_candid_features = 70,
+        max_features     = 70,
         min_samples_leaf = 1,
         print_tree       = False,
         is_prune         = True,
@@ -57,7 +57,7 @@ def nbtree_test(
     print "budget\t\t",     budget
     print "discretize\t",   is_discretize
     print "max_depth\t",    max_depth
-    print "max_ftures\t",   max_candid_features
+    print "max_ftures\t",   max_features
     print "criterion\t",    criterion
     print "is prune\t",     is_prune
     print "output\t\t",       output_file
@@ -68,16 +68,17 @@ def nbtree_test(
     t1 = time()
     if diffprivacy_mech is not "org":
         nbtree = NBTreeClassifier(
-                max_depth       = max_depth, 
                 diffprivacy_mech= diffprivacy_mech, 
-                criterion       = criterion, 
                 budget          = budget, 
-                print_tree      = print_tree, 
-                max_candid_features = max_candid_features,
+
+                criterion       = criterion, 
+                max_depth       = max_depth, 
+                max_features    = max_features,
                 min_samples_leaf= min_samples_leaf,
                 is_prune        = is_prune,
                 random_state    = random_state,
-                debug   = debug)
+                print_tree      = print_tree, 
+                debug           = debug)
 
         nbtree.set_meta(meta)
         nbtree.fit(X,y)
@@ -89,6 +90,10 @@ def nbtree_test(
         clf  = tree
     t2 = time()
     print "%.2fs"%(t2-t1)
+
+    return clf
+
+def evaluate( clf, X_test, y_test):
 
     y_true = y_test
     y_prob = clf.predict_proba(X_test)[:,-1]
@@ -126,8 +131,10 @@ def nbtree_test(
             sorted_y_pred = np.zeros(sorted_y_true.size)
             sorted_y_pred[0:i] = 1
 
-            recall    = metrics.recall_score(   sorted_y_true,sorted_y_pred,average='micro')
-            precision = metrics.precision_score(sorted_y_true,sorted_y_pred,average='micro')
+            recall    = metrics.recall_score(   
+                            sorted_y_true,sorted_y_pred,average='micro')
+            precision = metrics.precision_score(
+                            sorted_y_true,sorted_y_pred,average='micro')
             #f1_score = f1_score(test_label, predict2, average='micro')
             f1_score=2*precision*recall/(precision+recall)
 
@@ -145,7 +152,8 @@ def nbtree_test(
             precision = metrics.precision_score(y_true, y_pred, average='micro')
             #f1_score = f1_score(y_true, predict2, average='micro')
             f1_score  =2*precision*recall/(precision+recall)
-            print('[%.2f]\t%.3f\t%.3f\t%.3f\t%.3f'%(t, recall, precision, f1_score, auc))
+            print('[%.2f]\t%.3f\t%.3f\t%.3f\t%.3f'%
+                    (t, recall, precision, f1_score, auc))
     return score, auc
 
 def get_feature_importances(X, y, meta):
@@ -168,7 +176,7 @@ def get_feature_importances(X, y, meta):
 
     return features
 
-def preprocess( is_load_from_raw, is_discretize):
+def preprocess( is_load_from_raw=True, is_discretize=False):
 
     feature_in     = os.path.join(CUR_WORK_DIR, "dataset/feature.in")
     #feature_out    = os.path.join(CUR_WORK_DIR, "dataset/feature_c.out") #XXX
@@ -263,15 +271,17 @@ if __name__ == "__main__":
                     filename = "f%02d__s%dk__m%s__%c.log"%(f, s//1000, mech, dchar)
                     output_file = os.path.join(OUTPUT_DIR, filename)
                     
-                    score, auc = nbtree_test( X, y, X_test, y_test, meta,
-                                         diffprivacy_mech = mech,
-                                         budget           = -1.0,
+                    clf =nbtree_test(X, y, X_test, y_test, meta,
+                                     diffprivacy_mech = mech,
+                                     budget           = -1.0,
 
-                                         is_discretize    = is_discretize,
+                                     is_discretize    = is_discretize,
 
-                                         max_depth        = max_depth,
-                                         is_prune         = is_prune,
-                                         output_file      = output_file)
+                                     max_depth        = max_depth,
+                                     is_prune         = is_prune,
+                                     output_file      = output_file)
+
+                    score, auc = evaluate(clf, X_test, y_test)
 
                     sys.stdout = sys.__stdout__
                     print "[%2d]%-36s: %.4f, %.4f"%(cnt, filename, score, auc)
@@ -283,13 +293,15 @@ if __name__ == "__main__":
                         filename = "f%02d__s%dk__m%s__%c__b%.1f.log"%(f, s//1000, mech, dchar, b )
                         output_file = os.path.join(OUTPUT_DIR, filename)
                        
-                        score, auc = nbtree_test( X, y, X_test, y_test, meta,
+                        clf =nbtree_test(X, y, X_test, y_test, meta,
                                          diffprivacy_mech = mech,
                                          budget           = b,
 
                                          max_depth        = max_depth,
                                          is_prune         = is_prune,
                                          output_file      = output_file)
+
+                        score, auc = evaluate(clf, X_test, y_test)
 
                         sys.stdout = sys.__stdout__
                         print "[%2d]%-36s: %.4f, %.4f"%(cnt, filename, score, auc)

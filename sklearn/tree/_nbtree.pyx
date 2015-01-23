@@ -719,7 +719,7 @@ cdef class Splitter:
 
         self.features_win = NULL
         self.n_features = 0
-        self.max_candid_features = -1
+        self.max_features = -1
 
         self.feature_values  = NULL # tempory array
         self.records         = NULL
@@ -746,7 +746,7 @@ cdef class Splitter:
         free(self.n_sub_samples)
         free(self.wn_sub_samples)
 
-    cdef void init(self, Data* data, SIZE_t max_candid_features ) except *:
+    cdef void init(self, Data* data, SIZE_t max_features ) except *:
         ''' set data
             alloc samples_win, features_win, feature_values '''
         cdef SIZE_t i
@@ -764,12 +764,12 @@ cdef class Splitter:
         for i in range(n_features):
             features_win[i] = i
         
-        self.max_candid_features = max_candid_features
+        self.max_features = max_features
 
         # alloc space for temp arrays
         safe_realloc(&self.feature_values,  n_samples) 
 
-        # --> max_candid_features
+        # --> max_features
         self.records = <SplitRecord*> calloc( n_features, sizeof(SplitRecord))
         safe_realloc(&self.positions,       n_samples)
         safe_realloc(&self.improvements,    n_samples)
@@ -840,7 +840,7 @@ cdef class Splitter:
         cdef Data* data = self.data
         cdef Feature* feature
         cdef SIZE_t max_n_feature_values = data.max_n_feature_values
-        cdef SIZE_t max_candid_features  = self.max_candid_features
+        cdef SIZE_t max_features  = self.max_features
         
         cdef SIZE_t n_node_features = ptr_n_node_features[0]
 
@@ -903,7 +903,7 @@ cdef class Splitter:
         #    f_j is sampled randomely from this interval
         # [ f_i : n_node_features ): constant features found in this node
 
-        while f_v < f_i and visited_cnt < max_candid_features : 
+        while f_v < f_i and visited_cnt < max_features : 
 
             visited_cnt += 1    
 
@@ -1417,7 +1417,7 @@ cdef class NBTreeBuilder:
                     DOUBLE_t budget,
                     Splitter splitter,
                     SIZE_t max_depth,
-                    SIZE_t max_candid_features,
+                    SIZE_t max_features,
                     SIZE_t min_samples_leaf,
                     object random_state,
                     bint   print_tree,
@@ -1430,7 +1430,7 @@ cdef class NBTreeBuilder:
         self.splitter = splitter
 
         self.max_depth = max_depth  # verified by Classifier
-        self.max_candid_features = max_candid_features # verified
+        self.max_features = max_features # verified
         self.min_samples_leaf = min_samples_leaf
 
         self.tree = None
@@ -1456,7 +1456,7 @@ cdef class NBTreeBuilder:
        
         # set parameter for building tree 
         cdef SIZE_t max_depth = self.max_depth
-        cdef SIZE_t max_candid_features = self.max_candid_features
+        cdef SIZE_t max_features = self.max_features
         cdef SIZE_t min_samples_leaf =  self.min_samples_leaf
         if min_samples_leaf <= 0:
             min_samples_leaf = data.avg_n_feature_values
@@ -1502,7 +1502,7 @@ cdef class NBTreeBuilder:
         if debug:
             printf("begin to build tree\n")
 
-        splitter.init(data, max_candid_features) # set samples_win, features_win
+        splitter.init(data, max_features) # set samples_win, features_win
 
         cdef SplitRecord split_record 
         cdef Feature* feature

@@ -26,7 +26,7 @@ def nbtree_test(
         diffprivacy_mech = "no",
         budget           = 5, 
         criterion        = "entropy", 
-        max_candid_features = 70,
+        max_features     = 70,
         min_samples_leaf = 1,
         print_tree = False,
         is_prune = True,
@@ -38,7 +38,7 @@ def nbtree_test(
     print "budget\t\t", budget
     #print "discretize\t", discretize
     print "max_depth\t", max_depth
-    print "max_ftures\t", max_candid_features
+    print "max_ftures\t", max_features
     print "criterion\t", criterion
     print "is prune\t", is_prune
     #print "print_tree\t", print_tree
@@ -50,7 +50,7 @@ def nbtree_test(
                 criterion       = criterion, 
                 budget          = budget, 
                 print_tree      = print_tree, 
-                max_candid_features = max_candid_features,
+                max_features    = max_features,
                 min_samples_leaf= min_samples_leaf,
                 is_prune        = is_prune,
                 random_state    = random_state,

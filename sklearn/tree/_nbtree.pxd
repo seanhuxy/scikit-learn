@@ -148,13 +148,13 @@ cdef class Splitter:
     cdef DOUBLE_t* wn_sub_samples
 
 
-    cdef SIZE_t max_candid_features # reserved
+    cdef SIZE_t max_features        # reserved
 
     cdef object random_state        # Random state
     cdef UINT32_t rand_r_state      # sklearn_rand_r random number state
 
     # Methods
-    cdef void init(self, Data* data, SIZE_t max_candid_features)
+    cdef void init(self, Data* data, SIZE_t max_features)
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          DOUBLE_t* weighted_n_node_samples) # nogil
@@ -189,7 +189,7 @@ cdef class NBTreeBuilder:
 
     # tree parameter
     cdef SIZE_t max_depth
-    cdef SIZE_t max_candid_features
+    cdef SIZE_t max_features
     cdef SIZE_t min_samples_leaf 
 
     # inner structure

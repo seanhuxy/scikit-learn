@@ -62,18 +62,51 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                 criterion = "gini",
 
                 max_depth = 5,
-                max_candid_features = 14,
+                max_features = 14,
                 min_samples_leaf = 0,
 
+                is_prune = True,
                 CF = 0.25,
 
                 random_state = 1,
-
                 print_tree = True ,
-                is_prune = True,
-                debug = False
+                debug = False,
+
+                meta = None
                 ):
 
+        self.diffprivacy_mech = diffprivacy_mech
+        self.budget = budget
+        self.criterion = criterion
+       
+
+        self.max_depth = max_depth
+        self.max_features = max_features 
+        self.min_samples_leaf = min_samples_leaf
+
+        self.is_prune = is_prune
+        self.CF = CF
+    
+        self.random_state = random_state
+        self.print_tree = print_tree
+        self.debug = debug
+
+        self.meta  = meta
+
+        # inner structure
+        self.tree_ = None
+
+    def set_meta(self, meta):
+        self.meta = meta
+
+    def fit(self,
+            X, y,
+            sample_weight = None,
+            check_input   = None    # for randomforest, no use
+            ):
+
+        # set diffprivacy mech
+        diffprivacy_mech = self.diffprivacy_mech
         if isinstance(diffprivacy_mech, string_types):
             if diffprivacy_mech in ["no", "n"]:
                 diffprivacy_mech = NO_DIFF_PRIVACY_MECH
@@ -82,64 +115,72 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
             elif diffprivacy_mech in ["exponential", "exp", "e"]:
                 diffprivacy_mech = EXP_DIFF_PRIVACY_MECH
             else:
-                raise ValueError("diffprivacy_mech %s is illegal"%diffprivacy_mech)
+                raise ValueError("diffprivacy_mech %s is illegal"
+                                    %diffprivacy_mech)
 
         elif isinstance(diffprivacy_mech, (numbers.Integral, np.integer)):
-            if diffprivacy_mech not in [NO_DIFF_PRIVACY_MECH, LAP_DIFF_PRIVACY_MECH, EXP_DIFF_PRIVACY_MECH]:
+            if diffprivacy_mech not in [NO_DIFF_PRIVACY_MECH, 
+                                        LAP_DIFF_PRIVACY_MECH, 
+                                        EXP_DIFF_PRIVACY_MECH]:
                 raise ValueError
         else:
             raise ValueError
+        self.diffprivacy_mech_ = diffprivacy_mech
 
-        self.diffprivacy_mech = diffprivacy_mech
-
+        # set budget
+        budget = self.budget
         if diffprivacy_mech is NO_DIFF_PRIVACY_MECH:
             budget = -1.0
-        self.budget = budget
-       
-        if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
+        self.budget_ = budget
+      
+        # set criterion
+        criterion = self.criterion
+        if diffprivacy_mech is LAP_DIFF_PRIVACY_MECH:
             criterion = "lapentropy"
         if criterion not in ["gini", "entropy", "lapentropy"]:
             raise Exception("Invalid criterion %s"%criterion)
-        self.criterion = criterion
-        
-        if isinstance(random_state, (numbers.Integral, np.integer)):
-            self.random_state = np.random.RandomState(random_state)
-        elif isinstance(random_state, np.random.RandomState):
-            self.random_state = random_state
-        else:
-            self.random_state = np.random.RandomState()
-
-        self.max_depth = max_depth
-        self.max_candid_features = max_candid_features 
-        self.min_samples_leaf = min_samples_leaf
-
-        self.print_tree = print_tree
-        self.is_prune = is_prune
-        self.CF = CF
-
-        self.debug = debug
-
-        # inner structure
-        self._tree = None
-
-    def set_meta(self, meta):
-        self.meta = meta
-
-    def fit(self,
-            X, y,
-            sample_weight = None,
-            ):
-      
-        if self.meta is None:
-            raise Exception("Attribute meta is None, please set it first by set_meta()")
-        meta = self.meta
-
-        # random_state
+        self.criterion_ = criterion
+       
+        # set random_state
         random_state = self.random_state
+        if isinstance(random_state, (numbers.Integral, np.integer)):
+            random_state = np.random.RandomState(random_state)
+        elif isinstance(random_state, np.random.RandomState):
+            random_state = random_state
+        else:
+            random_state = np.random.RandomState()
+        self.random_state_ = random_state
 
+        max_depth = self.max_depth
+        if max_depth <= 0:
+            raise ValueError("max_depth must be greater than zero.")
+
+        max_features = self.max_features 
+        min_samples_leaf = self.min_samples_leaf
+
+        is_prune = self.is_prune
+        CF = self.CF
+
+        print_tree = self.print_tree
         debug = self.debug
 
+        # check meta
+        if self.meta is None:
+            raise Exception("Attribute meta is None, \
+                        please set it first by set_meta()")
+        meta = self.meta
+
+        X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
+        if y.ndim == 1:
+            # reshape is necessary to preserve the data contiguity against vs
+            # [:, np.newaxis] that does not.
+            y = np.reshape(y, (-1, 1))
+
+        # check sample_weight
+        n_samples , n_features = X.shape
         if sample_weight is not None:
+            print sample_weight
+
             if (getattr(sample_weight, "dtype", None) != DOUBLE or
                         not sample_weight.flags.contiguous):
                 sample_weight = np.ascontiguousarray(
@@ -152,56 +193,35 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                 raise ValueError("Number of weights=%d does not match "
                                  "number of samples=%d" %
                                  (len(sample_weight), n_samples))
-      
-        X, = check_arrays(X, dtype=DTYPE, sparse_format="dense")
-        if y.ndim == 1:
-            # reshape is necessary to preserve the data contiguity against vs
-            # [:, np.newaxis] that does not.
-            y = np.reshape(y, (-1, 1))
 
 
-        # 1. init Data
+        # init Data
         dataobject = DataObject(X, y, meta, sample_weight)
-
-        # 2. check parameter
-        max_depth = self.max_depth 
-        if max_depth <= 0:
-            raise ValueError("max_depth must be greater than zero.")
-        
-        # 3. setup budget, diffprivacy
-        diffprivacy_mech    = self.diffprivacy_mech
-        budget              = self.budget
-        max_candid_features = self.max_candid_features 
-
-        criterion = CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
-        splitter  = SPLITTERS[diffprivacy_mech ](criterion,  random_state, debug)
+        criterion =CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
+        splitter  =SPLITTERS[diffprivacy_mech ](criterion,  random_state, debug)
 
         tree = Tree(dataobject, debug)
-        self._tree = tree
+        self.tree_ = tree
 
-        #print "# ====================================="
-        #print "# b={0}, d={1}, prune={2}, CF={3}".format(budget, max_depth, self.is_prune, self.CF)
         builder = NBTreeBuilder(diffprivacy_mech,
                               budget,
                               splitter,
                               max_depth,
-                              max_candid_features,
-                              self.min_samples_leaf,
+                              max_features,
+                              min_samples_leaf,
                               random_state,
-                              self.print_tree,
-                              self.is_prune,
-                              self.CF)
+                              print_tree,
+                              is_prune,
+                              CF)
 
 
         # 4. build tree
         builder.build( tree, dataobject, debug)
         
-        #print "# ====================================="
-
-        self.data = dataobject 
-        if self.data.n_outputs == 1:
-            self.data.n_classes = self.data.n_classes[0]
-            self.data.classes = self.data.classes[0]
+        self.data_ = dataobject 
+        if self.data_.n_outputs == 1:
+            self.data_.n_classes = self.data_.n_classes[0]
+            self.data_.classes = self.data_.classes[0]
         return self
 
     def predict(self, X):
@@ -230,30 +250,30 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
 
         n_samples, n_features = X.shape
 
-        if self._tree is None:
+        if self.tree_ is None:
             raise Exception("Tree not initialized. Perform a fit first")
 
-        if self.data.n_features != n_features:
+        if self.data_.n_features != n_features:
             raise ValueError("Number of features of the model must "
                              " match the input. Model n_features is %s and "
                              " input n_features is %s "
-                             % (self.data.n_features, n_features))
+                             % (self.data_.n_features, n_features))
 
-        proba = self._tree.predict(X)
+        proba = self.tree_.predict(X)
 
         if debug:
             print "get out of tree.predict"
 
         # Classification
         if isinstance(self, ClassifierMixin):
-            if self.data.n_outputs == 1:
-                return self.data.classes.take(np.argmax(proba, axis=1), axis=0)
+            if self.data_.n_outputs == 1:
+                return self.data_.classes.take(np.argmax(proba, axis=1), axis=0)
 
             else:
-                predictions = np.zeros((n_samples, self.data.n_outputs))
+                predictions = np.zeros((n_samples, self.data_.n_outputs))
 
-                for k in xrange(self.data.n_outputs):
-                    predictions[:, k] = self.data.classes[k].take(
+                for k in xrange(self.data_.n_outputs):
+                    predictions[:, k] = self.data_.classes[k].take(
                         np.argmax(proba[:, k], axis=1),
                         axis=0)
 
@@ -279,19 +299,19 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
 
         n_samples, n_features = X.shape
 
-        if self._tree is None:
+        if self.tree_ is None:
             raise Exception("Tree not initialized. Perform a fit first.")
 
-        if self.data.n_features != n_features:
+        if self.data_.n_features != n_features:
             raise ValueError("Number of features of the model must "
                              " match the input. Model n_features is %s and "
                              " input n_features is %s "
-                             % (self.data.n_features, n_features))
+                             % (self.data_.n_features, n_features))
 
-        proba = self._tree.predict(X)
+        proba = self.tree_.predict(X)
 
-        if self.data.n_outputs == 1:
-            proba = proba[:, :self.data.n_classes]
+        if self.data_.n_outputs == 1:
+            proba = proba[:, :self.data_.n_classes]
             normalizer = proba.sum(axis=1)[:, np.newaxis]
             normalizer[normalizer == 0.0] = 1.0
             proba /= normalizer
@@ -301,8 +321,8 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         else:
             all_proba = []
 
-            for k in xrange(self.data.n_outputs_):
-                proba_k = proba[:, k, :self.data.n_classes_[k]]
+            for k in xrange(self.data_.n_outputs_):
+                proba_k = proba[:, k, :self.data_.n_classes_[k]]
                 normalizer = proba_k.sum(axis=1)[:, np.newaxis]
                 normalizer[normalizer == 0.0] = 1.0
                 proba_k /= normalizer
@@ -323,11 +343,11 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         -------
         feature_importances_ : array, shape = [n_features]
         """
-        if self._tree is None:
+        if self.tree_ is None:
             raise ValueError("Estimator not fitted, "
                              "call `fit` before `feature_importances_`.")
 
-        return self._tree.compute_feature_importances()
+        return self.tree_.compute_feature_importances()
 
 
 
