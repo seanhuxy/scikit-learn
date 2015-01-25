@@ -66,6 +66,8 @@ cdef class Criterion:
     cdef SIZE_t* samples_win            # reserved, from splitter
     cdef SIZE_t n_node_samples          # reserved 
     cdef DOUBLE_t weighted_n_node_samples
+    cdef DOUBLE_t weighted_n_left       # only for continuous features
+    cdef DOUBLE_t weighted_n_right      # above, too
     
     cdef SIZE_t start
     cdef SIZE_t end

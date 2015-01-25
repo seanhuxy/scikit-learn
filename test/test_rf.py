@@ -5,8 +5,7 @@ import time
 CUR_WORK_DIR= os.getcwd()
 sys.path.append(CUR_WORK_DIR)
 
-from sklearn.ensemble import RandomForestClassifier as RandomForest
-from sklearn.ensemble import ForestClassifier
+from sklearn.ensemble.forest import ForestClassifier
 from sklearn.tree import NBTreeClassifier
 
 from final_test import preprocess, evaluate
@@ -61,14 +60,19 @@ class DPRandomForestClassifier(ForestClassifier):
         self.max_features = max_features
         self.min_samples_leaf = min_samples_leaf
         self.is_prune   = is_prune
-        self.print_tree = True
+        self.print_tree = print_tree
         self.debug      = debug
 
         self.meta = meta
 
 def randomforest_test():
 
-    p = preprocess()
+    is_load_from_raw = False
+    is_discretize = True
+
+    c_prep = preprocess(is_load_from_raw, is_discretize = is_discretize, dataset="adult")
+
+    p = c_prep
 
     X, y = p.get_train_X_y()
     X_test, y_test = p.get_test_X_y()
@@ -93,7 +97,7 @@ def randomforest_test():
     rf = DPRandomForestClassifier( 
             base_estimator  = nbtree,
             n_estimators    = n_estimators,
-            n_jobs          = 1,
+            n_jobs          = -1,
             
             diffprivacy_mech= diffprivacy_mech,
             budget          = budget,

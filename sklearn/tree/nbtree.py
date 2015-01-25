@@ -176,10 +176,12 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
             # [:, np.newaxis] that does not.
             y = np.reshape(y, (-1, 1))
 
+        if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
+            y = np.ascontiguousarray(y, dtype=DOUBLE)
+ 
         # check sample_weight
         n_samples , n_features = X.shape
         if sample_weight is not None:
-            print sample_weight
 
             if (getattr(sample_weight, "dtype", None) != DOUBLE or
                         not sample_weight.flags.contiguous):
@@ -213,8 +215,6 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
                               print_tree,
                               is_prune,
                               CF)
-
-
         # 4. build tree
         builder.build( tree, dataobject, debug)
         
@@ -223,6 +223,18 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
             self.data_.n_classes = self.data_.n_classes[0]
             self.data_.classes = self.data_.classes[0]
         return self
+
+    @property
+    def n_outputs_(self):
+        return self.data_.n_outputs
+
+    @property 
+    def n_classes_(self):
+        return self.data_.n_classes
+
+    @property 
+    def classes_(self):
+        return self.data_.classes
 
     def predict(self, X):
         """Predict class or regression value for X.

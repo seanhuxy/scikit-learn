@@ -191,8 +191,8 @@ cdef class Criterion:
     cdef void reset(self, SIZE_t feature_index ):
         self.pos = self.start
             
-        #self.weighted_n_left = 0.0  #XXX
-        #self.weighted_n_right = self.weighted_n_node_samples
+        self.weighted_n_left  = 0.0
+        self.weighted_n_right = self.weighted_n_node_samples
 
         cdef Data* data        = self.data
         cdef Feature* feature  = &data.features[ feature_index ]
@@ -208,7 +208,6 @@ cdef class Criterion:
         cdef double* label_count_left  = label_count
         cdef double* label_count_right = label_count + feature_stride
 
-        # XXX
         memset(label_count, 0, feature.n_values * feature_stride * sizeof(double))
 
         cdef SIZE_t k = 0
@@ -272,9 +271,8 @@ cdef class Criterion:
 
             diff_w += w
 
-        # XXX
-        #self.weighted_n_left  += diff_w
-        #self.weighted_n_right -= diff_w
+        self.weighted_n_left  += diff_w
+        self.weighted_n_right -= diff_w
 
         self.pos = new_pos
 
@@ -379,7 +377,7 @@ cdef class Criterion:
         for i in range(n_subnodes):
             sub = self.children_impurity(label_count, wn_subnodes_samples[i], epsilon)
             
-            if 0:
+            if debug:
                 printf("\t\t\tsub[%d] %5.0f * %3.2f  = %5.2f\n", i, 
                                         wn_subnodes_samples[i], 
                                         sub, 
@@ -394,7 +392,7 @@ cdef class Criterion:
             
             label_count += self.feature_stride 
 
-        if 0:
+        if debug:
             printf("impurity-improvement: %f-%f=%f\n",
                     impurity, improvement, impurity-improvement)
 
@@ -489,8 +487,12 @@ cdef class Gini(Criterion):
                 count = label_count[c] 
                 
                 if count < 0.0:
-                    printf("Gini: label_count[%d]=%d should >= 0.0", c, count)
-                    exit(0)
+                    printf("Gini: label_count[%d]=%.2f should >= 0.0\n", c, count)
+                    exit(1)
+                if count > wn_samples:
+                    printf("Gini: label_count[%d]=%.2f should <= wn_samples %.2f\n",
+                            c, count, wn_samples)
+                    #exit(1)
 
                 sub = count / wn_samples 
                 gini += sub * sub
@@ -687,22 +689,6 @@ cdef inline void _init_split(SplitRecord* self): #nogil:
     #self.n_subnodes_samples  = NULL
     #self.wn_subnodes_samples = NULL
 
-#cdef inline void _copy_split(SplitRecord* from_, SplitRecord* to):
-
-#    to.feature_index  = from_.feature_index
-#    to.threshold      = from_.threshold
-#    to.improvement    = from_.improvement
-#    to.n_subnodes     = from_.n_subnodes
-#    to.n_subnodes_samples  = <SIZE_t*>  calloc(to.n_subnodes, sizeof(SIZE_t))
-#    to.wn_subnodes_samples = <DOUBLE_t*>calloc(to.n_subnodes, sizeof(SIZE_t))
-#
-#    for i in range(to.n_subnodes):
-#        to.n_subnodes_samples[i] = from_.n_subnodes_samples[i]
-#        to.wn_subnodes_samples[i]= from_.wn_subnodes_samples[i]
-#
-#    if 0:
-#        printf("from %p, to %p\n", from_.n_subnodes_samples, to.n_subnodes_samples)
-
 cdef class Splitter:
 
     def __cinit__(self, Criterion criterion, object random_state, bint debug):
@@ -747,16 +733,30 @@ cdef class Splitter:
         free(self.wn_sub_samples)
 
     cdef void init(self, Data* data, SIZE_t max_features ) except *:
-        ''' set data
+        ''' set data, once for a tree
             alloc samples_win, features_win, feature_values '''
-        cdef SIZE_t i
+        cdef SIZE_t i, j
 
         # set samples window
         cdef SIZE_t n_samples = data.n_samples
-
         cdef SIZE_t* samples_win  = safe_realloc(&self.samples_win, n_samples)
+
+        cdef double weighted_n_samples = 0.0
+        cdef DOUBLE_t* sample_weight = data.sample_weight
+
+        j = 0
         for i in range(n_samples):
-            samples_win[i] = i
+            if sample_weight == NULL or sample_weight[i] > 0.0:
+                samples_win[j] = i
+                j += 1
+
+            if sample_weight != NULL:
+                weighted_n_samples += sample_weight[i]
+            else:
+                weighted_n_samples += 1.0
+
+        data.n_samples = j
+        data.weighted_n_samples = weighted_n_samples
 
         # set features window
         cdef SIZE_t  n_features = data.n_features
@@ -866,7 +866,7 @@ cdef class Splitter:
         cdef DOUBLE_t w   = 0.0
         cdef SIZE_t tmp, i
 
-        cdef bint debug = self.debug
+        cdef bint debug = 0
 
         cdef DOUBLE_t epsilon_per_feature 
         if diffprivacy_mech == LAP_DIFF_PRIVACY_MECH:
@@ -966,7 +966,7 @@ cdef class Splitter:
                         if data.sample_weight == NULL:
                             w = 1.0
                         else:
-                            w = data.sample_weight[ i ]
+                            w = data.sample_weight[ samples_win[i] ]
 
                         n_sub_samples [ <SIZE_t>Xf[i] ] += 1 
                         wn_sub_samples[ <SIZE_t>Xf[i] ] += w
@@ -1199,9 +1199,7 @@ cdef class ExpSplitter(Splitter):
 
                 n_samples[0]  = end_p - start # [start, end_p)
                 n_samples[1]  = end - end_p   # [end_p, end)
-                wn_samples[0] = <DOUBLE_t>n_samples[0] #XXX
-                wn_samples[1] = <DOUBLE_t>n_samples[1]
-
+                
                 # thresh = random from (start_p, end_p)
                 # threshold = Xf[start_p] + rand_double(rand)*(Xf[end_p]-Xf[start_p])
 
@@ -1216,8 +1214,10 @@ cdef class ExpSplitter(Splitter):
                 # left <= start_p < thresh < end_i <= right
 
                 self.criterion.cupdate(samples_win, best.feature_index, end_p)
-                improvement = self.criterion.improvement(wn_samples, #XXX
-                                                         2, # n_subnodes
+                wn_samples[0] = self.criterion.weighted_n_left
+                wn_samples[1] = self.criterion.weighted_n_right
+                improvement = self.criterion.improvement(wn_samples, 
+                                                         2,         # n_subnodes
                                                          impurity, 
                                                          NO_DIFF_PRIVACY_BUDGET)
 
@@ -1295,18 +1295,28 @@ cdef class DataObject:
     
     def __cinit__(self, 
                 np.ndarray[DTYPE_t,  ndim=2] X,
-                np.ndarray[DOUBLE_t, ndim=2, mode="c"] y, 
+                np.ndarray[DOUBLE_t, ndim=2] y, 
                 meta_features, 
                 np.ndarray sample_weight):
         
+        cdef SIZE_t i
+
         cdef SIZE_t n_samples  = X.shape[0]
         cdef SIZE_t n_features = X.shape[1]
-       
-        cdef DOUBLE_t weighted_n_samples = 0.0
-        cdef SIZE_t i
+
         if sample_weight is not None:
-            for i in range(n_samples):
+            if ((sample_weight.dtype != DOUBLE) or
+                (not sample_weight.flags.contiguous)):
+
+                sample_weight = np.asarray(sample_weight, dtype=DOUBLE, order="C")
+
+        cdef DOUBLE_t weighted_n_samples = 0.0 
+        for i in range(n_samples):
+            if sample_weight is not None:
                 weighted_n_samples += sample_weight[i]
+            else:
+                weighted_n_samples += 1.0
+
         # y
         y = np.atleast_1d(y)
         if y.ndim == 1:
@@ -1314,7 +1324,6 @@ cdef class DataObject:
        
         # class
         cdef SIZE_t n_outputs = y.shape[1]
-        #y = np.copy(y) # why copy? XXX
         cdef SIZE_t* n_classes = <SIZE_t*>calloc(n_outputs, sizeof(SIZE_t))
         cdef SIZE_t max_n_classes = 0
 
@@ -1355,18 +1364,6 @@ cdef class DataObject:
 
         avg_n_feature_values /= n_features
 
-        if 0:
-            printf("features:\n")
-            for i in range(n_features):
-                if features[i].type == FEATURE_DISCRETE: 
-                    printf("[%d] discrete, n %d\n", i, features[i].n_values)
-                if features[i].type == FEATURE_CONTINUOUS:
-                    printf("[%d] continuous, n %d, %f - %f\n",
-                            i, 
-                            features[i].n_values, 
-                            features[i].min, 
-                            features[i].max)
-
         # set data
         cdef Data* data = <Data*>calloc(1,sizeof(Data))
 
@@ -1386,8 +1383,8 @@ cdef class DataObject:
 
         data.n_features = n_features
         data.features = features
-        data.max_n_feature_values = max_n_feature_values
         data.n_continuous_features = n_continuous_features
+        data.max_n_feature_values = max_n_feature_values
         data.avg_n_feature_values  = avg_n_feature_values
 
         # classes

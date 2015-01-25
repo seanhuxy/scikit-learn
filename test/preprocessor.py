@@ -273,7 +273,9 @@ class Preprocessor:
         return self.features
 
     def get_first_nsf(self, n_samples, n_features, feature_importances):
-       
+      
+        print "get first %dK smpl and %d feature"%(n_samples//1000, n_features)
+        t0 = time()
         features = self.features[ feature_importances[ : n_features] ]
 
         train = self.get_train()
@@ -284,6 +286,8 @@ class Preprocessor:
         test = self.get_test()
         X_test = test[ : , feature_importances[ : n_features]]
         y_test = test[ : , -1]
+        t1 = time()
+        print "cost %.2fs"%(t1-t0)
 
         return X, y, X_test, y_test, features
 
@@ -574,7 +578,7 @@ class Preprocessor:
         n_test_samples  = test_data.shape[0]
         data = np.concatenate((train_data, test_data), axis=0)
 
-        #data = data.astype(float)
+        data = data.astype(float)
 
         self.n_train_samples = n_train_samples
         self.n_test_samples  = n_test_samples
