@@ -1,24 +1,10 @@
-import os
-import sys
-import numpy as np
-from time import time
-#abspath = os.path.abspath(__file__)
 
-CUR_WORK_DIR= os.getcwd()
-OUTPUT_DIR  = os.path.join(CUR_WORK_DIR, "log")  
-sys.path.append(CUR_WORK_DIR)
+DATA_DIR = os.path.join(CUR_WORK_DIR, "dataset")
+FEATURE_IMPORTANCE_FILE = os.path.join(CUR_WORK_DIR,
+                            "dataset/feature_importance.npy"
 
-import sklearn
-from sklearn.tree import NBTreeClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.cross_validation import cross_val_score
-from sklearn import metrics
-
-import preprocessor
-from preprocessor import Preprocessor
-
-def nbtree_test(
-        X, y, X_test, y_test, meta,
+def build(
+        X, y, meta,
 
         is_discretize    = False,
         diffprivacy_mech = "lap",
@@ -91,6 +77,10 @@ def nbtree_test(
 
     return clf
 
+
+    pass
+
+
 def evaluate( clf, X_test, y_test):
 
     y_true = y_test
@@ -159,13 +149,18 @@ def evaluate( clf, X_test, y_test):
 
     return score, auc
 
-def get_feature_importances(X, y, meta):
+def load_feature_importances():
+    filename = FEATURE_IMPORTANCE_FILE 
+    features = np.load(filename)
+    return features
+
+def cal_feature_importances(X, y, meta):
 
     print "get feature importance.."
 
-    filename = os.path.join( CUR_WORK_DIR, "dataset/feature_importance.npy")
-    #features = np.load(filename)
-    #return features
+    filename = FEATURE_IMPORTANCE_FILE 
+    features = np.load(filename)
+    return features
 
     # get from a standard classifier algor
     tree = DecisionTreeClassifier()
@@ -187,139 +182,61 @@ def get_feature_importances(X, y, meta):
 
     return features
 
-def preprocess( is_load_from_raw=False, is_discretize=False, dataset="liantong", dmethod="cluster"):
+def get_first_nsf( data, features, n_train, n_test, 
+                    n_samples, n_features, feature_importances):
+      
+    #print "get first %dK smpl and %d f"%(n_samples//1000, n_features)
+    t0 = time()
+    features = features[ feature_importances[ : n_features] ]
 
-    feature_in     = os.path.join(CUR_WORK_DIR, "dataset/feature.in")
+    train = data[         : n_train, :]
+    X = train[ : n_samples, feature_importances[ : n_features]]
+    y = train[ : n_samples, -1]
 
+    test  = data[ n_train : n_train + n_test, : ]
+    X_test = test[ : , feature_importances[ : n_features]]
+    y_test = test[ : , -1]
+
+    t1 = time()
+    #print "cost %.2fs"%(t1-t0)
+
+    return X, y, X_test, y_test, features
+
+
+def get_data(
+            is_load_from_raw=False, 
+            is_discretize=False, 
+            dataset="liantong", 
+            dmethod="cluster"):
+
+    feature_in     = os.path.join(DATA_DIR, "feature.in")
     if dataset == "liantong":
-        train_data_in  = os.path.join(CUR_WORK_DIR, "dataset/0506/05_cln.npy")
-        test_data_in   = os.path.join(CUR_WORK_DIR, "dataset/0506/06_cln.npy")
+        train_data_in  = os.path.join(DATA_DIR, "0506/05_cln.npy")
+        test_data_in   = os.path.join(DATA_DIR, "0506/06_cln.npy")
     else:
-        train_data_in  = os.path.join(CUR_WORK_DIR, "dataset/adult.data")
-        test_data_in   = os.path.join(CUR_WORK_DIR, "dataset/adult.test")
+        train_data_in  = os.path.join(DATA_DIR, "adult.data")
+        test_data_in   = os.path.join(DATA_DIR, "adult.test")
 
     if is_discretize: 
-        feature_out    = os.path.join(CUR_WORK_DIR, "dataset/feature_d.out")
-        train_data_out = os.path.join(CUR_WORK_DIR, "dataset/data_d.out.npy")
-        test_data_out  = os.path.join(CUR_WORK_DIR, "dataset/test_d.out.npy")
+        feature_out    = os.path.join(DATA_DIR, "feature_d.out")
+        train_data_out = os.path.join(DATA_DIR, "data_d.out.npy")
+        test_data_out  = os.path.join(DATA_DIR, "test_d.out.npy")
     else:
-        feature_out    = os.path.join(CUR_WORK_DIR, "dataset/feature_c.out") 
-        train_data_out = os.path.join(CUR_WORK_DIR, "dataset/data_c.out.npy")
-        test_data_out  = os.path.join(CUR_WORK_DIR, "dataset/test_c.out.npy")
+        feature_out    = os.path.join(DATA_DIR, "feature_c.out") 
+        train_data_out = os.path.join(DATA_DIR, "data_c.out.npy")
+        test_data_out  = os.path.join(DATA_DIR, "test_c.out.npy")
 
 
     preprocessor = Preprocessor()
     if is_load_from_raw:
         preprocessor.load( feature_in, train_data_in, test_data_in, 
-                            is_discretize= is_discretize, nbins=10, 
+                            is_discretize = is_discretize, nbins=10, 
                             dmethod=dmethod)
-
         preprocessor.export( feature_out, 
                             train_data_out, test_data_out)
 
     else:
-        print "load from exit" 
         preprocessor.load_existed(feature_out, 
                         train_data_out, test_data_out)
-        print "finished"
-
     return preprocessor
-
-if __name__ == "__main__":
-    is_load_from_raw = False
-
-    c_prep = preprocess(is_load_from_raw, 
-                        is_discretize = False, dataset="adult")
-    d_prep = preprocess(is_load_from_raw, 
-                        is_discretize = True,  dataset="audlt")
-
-    #for f in c_prep.features:
-    #    f.type = preprocessor.FEATURE_CONTINUOUS
-    #    f.n_values = 2
-    
-    # criterion
-    criterions = ["entropy", "gini"]
-    criterion = criterions[0]
-
-    # budgets
-    #budgets = [ 9., 7., 5., 3., 1., 0.5, 0.1, 0.01 ]
-    budgets = [ 9., 5., 1. ]
-
-    # feature_importances
-    X, y = c_prep.get_train_X_y()
-    max_depth = 10
-    is_prune  = True
-
-
-    for s in n_samples:
-        #X, y = first_n_samples( __train_data , s )
-        for f in n_features:
-               
-            for is_discretize in [False, True]:
-
-                if is_discretize is True:
-                    X, y, X_test, y_test, meta = \
-                        d_prep.get_first_nsf( s, f, 
-                                        feature_importances )
-                    dpmechs = ["lap", "exp"]
-                    dchar = 'd'
-                    
-                else:
-                    X, y, X_test, y_test, meta = \
-                        c_prep.get_first_nsf( s, f, 
-                                            feature_importances )
-                    dpmechs = ["exp"]
-                    dchar = 'c'
-
-                #dpmechs = []
-                
-                nodpmechs = ["no", "org"]
-                #nodpmechs = ["no"]
-                for mech in nodpmechs:
-
-                    filename = "f%02d__s%dk__m%s__%c.log"\
-                        %(f, s//1000, mech, dchar)
-                    output_file = os.path.join(OUTPUT_DIR, filename)
-                
-                    clf =nbtree_test(X, y, X_test, y_test, meta,
-                                     diffprivacy_mech = mech,
-                                     budget           = -1.0,
-
-                                     is_discretize    = is_discretize,
-
-                                     max_depth        = max_depth,
-                                     is_prune         = is_prune,
-                                     output_file      = output_file)
-
-                    score, auc = evaluate(clf, X_test, y_test)
-
-                    sys.stdout = sys.__stdout__
-                    print "[%2d]%-36s: %.4f, %.4f"\
-                        %(cnt, filename, score, auc)
-                    cnt += 1
-
-                for mech in dpmechs:
-                    for b in budgets:
-
-                        filename = "f%02d__s%dk__m%s__%c__b%.1f.log"\
-                            %(f, s//1000, mech, dchar, b )
-                        output_file = os.path.join(OUTPUT_DIR, 
-                                                    filename)
-                       
-                        clf =nbtree_test(X, y, X_test, y_test, meta,
-                                         diffprivacy_mech = mech,
-                                         budget           = b,
-
-                                         max_depth        = max_depth,
-                                         is_prune         = is_prune,
-                                         output_file      = output_file
-                                         )
-
-                        score, auc = evaluate(clf, X_test, y_test)
-
-                        sys.stdout = sys.__stdout__
-                        print "[%2d]%-36s: %.4f, %.4f"\
-                            %(cnt, filename, score, auc)
-                        cnt += 1
-            print ""
 

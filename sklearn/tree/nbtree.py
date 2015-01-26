@@ -42,7 +42,8 @@ EXP_DIFF_PRIVACY_MECH = 2
 
 CRITERIA_CLF ={ "gini"      : _nbtree.Gini, 
                 "entropy"   : _nbtree.Entropy, 
-                "lapentropy": _nbtree.LapEntropy } 
+                "noiseentropy": _nbtree.NoiseEntropy,
+                "noisegini" : _nbtree.NoiseGini} 
 
 SPLITTERS = { NO_DIFF_PRIVACY_MECH  : ExpSplitter, 
               LAP_DIFF_PRIVACY_MECH : LapSplitter,
@@ -79,7 +80,6 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         self.budget = budget
         self.criterion = criterion
        
-
         self.max_depth = max_depth
         self.max_features = max_features 
         self.min_samples_leaf = min_samples_leaf
@@ -136,10 +136,16 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
         # set criterion
         criterion = self.criterion
         if diffprivacy_mech is LAP_DIFF_PRIVACY_MECH:
-            criterion = "lapentropy"
-        if criterion not in ["gini", "entropy", "lapentropy"]:
+            if criterion is "gini":
+                criterion = "noisegini"
+            if criterion is "entropy":
+                criterion = "noiseentropy"
+        if criterion not in ["gini", "entropy", 
+                            "noiseentropy", "noisegini"]:
             raise Exception("Invalid criterion %s"%criterion)
         self.criterion_ = criterion
+
+        print "criterion", criterion
        
         # set random_state
         random_state = self.random_state
@@ -199,7 +205,7 @@ class NBTreeClassifier(six.with_metaclass(ABCMeta, BaseEstimator,
 
         # init Data
         dataobject = DataObject(X, y, meta, sample_weight)
-        criterion =CRITERIA_CLF[self.criterion](dataobject, random_state, debug)
+        criterion =CRITERIA_CLF[criterion](dataobject, random_state, debug)
         splitter  =SPLITTERS[diffprivacy_mech ](criterion,  random_state, debug)
 
         tree = Tree(dataobject, debug)
