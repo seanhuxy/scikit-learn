@@ -1,34 +1,61 @@
+"""
+A test python script, to compare the accuracy, auc 
+of three different differential privacy classifications
+in different setting of the number of features
+"""
+__author__ = "Xueyang Hu"
+__email__  = "huxuyangs@gmail.com"
+
 import os
+import sys
 from os.path import join
-sys.path.append(CUR_WORK_DIR)
-CUR_WORK_DIR= os.getcwd()
-OUTPUT_DIR  = os.path.join(CUR_WORK_DIR, "log/sample")
-
 from cStringIO import StringIO
+CUR_WORK_DIR= os.getcwd() # Current Work Directory
+sys.path.append(CUR_WORK_DIR)
+from sklearn.externals.joblib import Parallel, delayed
+from utils import *
 
-# constant
-# get data
-is_load_from_raw = False
-is_discretize = False
-dataset = "liantong"
-dmethod = "cluster"
+# Constant for Input and Output
+LOAD_FROM_TXT = False   # load dataset from txt or binary
+DATASET     = "liantong"# data set
+DISC_METHOD = "cluster" # the method for discretizing continuous 
+                        # features
 
-criterion = "gini"
-is_prune  = True
-max_depth = 10
-max_features = 70
+# output directory for logs
+OUTPUT_DIR  = os.path.join(CUR_WORK_DIR, "log/feature")
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
 
-# Input and Output
-output_dir = "log/feature_test"
+# Number of Cores for parallel computing
+N_CORES = 30
 
-# Variable
-n_features = [  4, 8, 12, 16, 20, 30, 40, 50, 60, 70 ]          
-n_samples  = [  100000, # 0.1M
-                1000000, # 1.0M ]
+# Constant Parameters For Building Tree
+CRITERION = "gini"
+IS_PRUNE  = True
+MAX_DEPTH = 10
+MAX_FEATURES = 70
+MIN_SAMPLES_LEAF = 1
 
-budgets = [ 0.01, 0.1, 0.5, 1., 3., 5., 7., 9.]
-mechs = ["no", "lap", "exp"]
-discs = [ True, False ]
+PRINT_TREE = False
+DEBUG      = False
+
+RANDOM_STATE = 1
+
+MECHS = ["no", "lap", "exp"]
+DISCS = [ True, False ]
+DCHAR = { True  : 'd', 
+          False : 'c' }
+
+BUDGETS = [ 0.01, 0.1, 0.5, 1., 3., 5., 7., 9.]
+
+# Variables
+N_FEATURES  = [  4, 8, 12, 16, 20, 30, 40, 50, 60, 70 ]          
+N_SAMPLES   = [  100000, # 0.1M
+                1000000, # 1.0M 
+              ]
+# XXX
+N_FEATURES = [ 3, 7, 10, 14]
+N_SAMPLES  = [ 20000]
 
 def test(cp, dp, feature_importances, 
          n_samples,
@@ -36,64 +63,67 @@ def test(cp, dp, feature_importances,
          ):
 
     auc_str = StringIO()
-    src_str = StringIO()
+    scr_str = StringIO()
 
-    stat_name = "%dKs_%.2fb.stat"%(n_samples//1000, budget))
-    stat_path = join(OUTPUT_DIR, log_name)
+    stat_name = "%dKs_%.2fb.stat"%(n_samples//1000, budget)
+    stat_path = join(OUTPUT_DIR, stat_name)
 
-    log_name = "%dKs_%.2fb.log"%(n_samples//1000, budget))
+    log_name = "%dKs_%.2fb.log"%(n_samples//1000, budget)
     log_path = join(OUTPUT_DIR, log_name)
     open(log_path, 'w').close()
 
-    auc_str.write("AUC table -- %dK s %.2f b\n"%(\
-                    n_samples//1000, budget))
-    scr_str.write("Score table -- %dK s %.2f b\n"%
-                    (n_samples//1000, budget))
+    auc_str.write("AUC table -- %dKs, %.2fb\n"\
+                %(n_samples//1000, budget))
+    scr_str.write("Score table -- %dKs, %.2fb\n"\
+                %(n_samples//1000, budget))
+
 
     auc_str.write("clf\tdis\t")
     scr_str.write("clf\tdis\t")
-    for f in n_features:
+    for f in N_FEATURES:
         auc_str.write("%2d\t"%f)
         scr_str.write("%2d\t"%f)
     scr_str.write("\n")
     auc_str.write("\n")
 
-    for mech in mechs:
-        for disc in discs:
+    for mech in MECHS:
+        for disc in DISCS:
             if mech is "lap" and disc is False:
                 continue
 
-            auc_str.write("%s\t%c\t"%(mech, dchar))
-            scr_str.write("%s\t%c\t"%(mech, dchar))
+            p = dp if disc else cp
+            auc_str.write("%s\t%c\t"%(mech, DCHAR[disc]))
+            scr_str.write("%s\t%c\t"%(mech, DCHAR[disc]))
 
-            for f in n_features:
+            for f in N_FEATURES:
                 
-                p = dp if disc else cp
-
                 X, y, X_t, y_t, meta = p.get_first_nsf(
                                             n_samples,
                                             f,
                                             feature_importances)
-
                 clf = build(X, y, meta,
                       is_discretize = disc,
                       diffprivacy_mech = mech,
                       budget = budget,
 
-                      criterion = criterion,
-                      max_depth = max_depth,
-                      min_samples_leaf = min_samples_leaf,
-                      is_prune  = is_prune,
+                      criterion = CRITERION,
+                      max_depth = MAX_DEPTH,
+                      max_features = MAX_FEATURES,
+                      min_samples_leaf = MIN_SAMPLES_LEAF,
+                      is_prune  = IS_PRUNE,
 
-                      print_tree = print_tree,
-                      debug = debug,
-                      random_state = random_state,
+                      print_tree = PRINT_TREE,
+                      debug      = DEBUG,
+                      random_state = RANDOM_STATE,
                       output_file = log_path)
 
                 score, auc = evaluate( clf, X_t, y_t, log_path)
 
                 auc_str.write("%.2f\t"%(auc*100.))
                 scr_str.write("%.2f\t"%(score*100.))
+            auc_str.write("\n")
+            scr_str.write("\n")
+
 
     sys.stdout = sys.__stdout__
     print "------------------------------------------------------"
@@ -107,21 +137,19 @@ def test(cp, dp, feature_importances,
 
 def main():
 
-    cp = get_data(False, False)
-    dp = get_data(False, True )
+    cp = get_data(LOAD_FROM_TXT, False)
+    dp = get_data(LOAD_FROM_TXT, True )
     feature_importances = load_feature_importances()
 
     jobs = []
-    for s in n_samples:
-        for b in budgets:
+    for s in N_SAMPLES:
+        for b in BUDGETS:
             jobs.append( 
                 delayed(test)(cp, dp,
                                 feature_importances,
-                                s,
-                                budget = b) 
+                                s, b) 
             )
 
-    n_cores = 30
-    Parallel(n_jobs = n_cores, max_nbytes=1e3)( jobs )
+    Parallel(n_jobs = N_CORES, max_nbytes=1e3)( jobs )
 
-
+main()

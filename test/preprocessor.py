@@ -187,10 +187,10 @@ class Feature:
             max_ = np.max(data)
             min_ = np.min(data)
 
-            self.max = max_ if self.max in [None, np.NaN] or\
-                                max_ > self.max else self.max
-            self.min = min_ if self.min in [None, np.NaN] or\ 
-                                min_ < self.min else self.min
+            self.max = max_ if (self.max in [None, np.NaN] or
+                                max_ > self.max) else self.max
+            self.min = min_ if (self.min in [None, np.NaN] or
+                                min_ < self.min) else self.min
 
         else:
             raise Exception, "Unknown feature type", self.type
@@ -483,8 +483,8 @@ class Preprocessor:
 
             t3 = time()
             if verbose:
-            print "[%2d] %25s, t=%d %.2fs"%(
-                    i, f.name, f.type, t0-t3)
+                print "[%2d] %25s, t=%d %.2fs"\
+                        %(i, f.name, f.type, t0-t3)
         td1 = time()
         if verbose:
             print "parsing done, %.2fs"%(td1-td0)
@@ -609,7 +609,7 @@ class Preprocessor:
 
                 elif feature.type == FEATURE_DISCRET:
                     if not feature.indices.has_key(v):
-                        raise Exception, 
+                        raise Exception, \
                         "Error feature {0} has not value {1}"\
                         .format(str(feature), v)
 
@@ -631,8 +631,8 @@ class Preprocessor:
         if train_to_test == "9:1":
 
             self.n_train_samples = 9 * (n_samples // 10)
-            self.n_test_samples  = 
-                        n_samples - self.n_train_samples
+            self.n_test_samples = \
+                    n_samples - self.n_train_samples
             print "train %d, test %d"%(self.n_train_samples, 
                                         self.n_test_samples)
 

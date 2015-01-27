@@ -1,7 +1,30 @@
+""" 
+Some common functions used in test scripts.
+Includes functions for loading datasets, building trees, 
+evaluating classifiers
+"""
+__author__ = "Xueyang Hu"
+__email__  = "huxuyangs@gmail.com"
 
-DATA_DIR = os.path.join(CUR_WORK_DIR, "dataset")
-FEATURE_IMPORTANCE_FILE = os.path.join(CUR_WORK_DIR,
-                            "dataset/feature_importance.npy"
+import os
+import sys
+from os.path import join
+import numpy as np
+from time import time
+
+CUR_WORK_DIR= os.getcwd() # Current Work Directory
+sys.path.append(CUR_WORK_DIR)
+
+from sklearn import metrics
+from sklearn.cross_validation import cross_val_score
+from sklearn.tree import NBTreeClassifier
+from sklearn.tree import DecisionTreeClassifier
+
+DATA_DIR = join(CUR_WORK_DIR, "dataset")
+FEATURE_IMPORTANCE_FILE = \
+        join(CUR_WORK_DIR, "dataset/feature_importance.npy")
+
+from preprocessor import Preprocessor
 
 def build(
         X, y, meta,
@@ -81,7 +104,14 @@ def build(
     pass
 
 
-def evaluate( clf, X_test, y_test):
+def evaluate( clf, X_test, y_test, output_file):
+
+    # redirect output to file
+    if output_file is None:
+        sys.stdout = sys.__stdout__
+    else:
+        sys.stdout = open(output_file, 'a')
+    
 
     y_true = y_test
     y_prob = clf.predict_proba(X_test)[:,-1]
@@ -229,8 +259,10 @@ def get_data(
 
     preprocessor = Preprocessor()
     if is_load_from_raw:
-        preprocessor.load( feature_in, train_data_in, test_data_in, 
-                            is_discretize = is_discretize, nbins=10, 
+        preprocessor.load( feature_in, 
+                            train_data_in, test_data_in, 
+                            is_discretize = is_discretize, 
+                            nbins=10, 
                             dmethod=dmethod)
         preprocessor.export( feature_out, 
                             train_data_out, test_data_out)

@@ -1,19 +1,62 @@
+"""
+A test python script, to compare the accuracy, auc 
+of three different differential privacy classifications
+in different setting of the size of train dataset
+"""
+__author__ = "Xueyang Hu"
+__email__  = "huxuyangs@gmail.com"
+
 import os
-from os.path import join
-
-CUR_WORK_DIR= os.getcwd()
-OUTPUT_DIR  = os.path.join(CUR_WORK_DIR, "log/randomforest")
-sys.path.append(CUR_WORK_DIR)
-
-from cStringIO import StringIO
-
 import sys
-import numpy as np
-import time
-
+from os.path import join
+from cStringIO import StringIO
+CUR_WORK_DIR= os.getcwd() # Current Work Directory
+sys.path.append(CUR_WORK_DIR)
+from sklearn.externals.joblib import Parallel, delayed
 from sklearn.ensemble.forest import ForestClassifier
 from sklearn.tree import NBTreeClassifier
+from utils import *
 
+# Constant for Input and Output
+LOAD_FROM_TXT = False   # load dataset from txt or binary
+DATASET     = "liantong"# data set
+DISC_METHOD = "cluster" # the method for discretizing continuous 
+                        # features
+
+# output directory for logs
+OUTPUT_DIR  = os.path.join(CUR_WORK_DIR, "log/randomforest")
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
+
+# Number of Cores for parallel computing
+N_CORES = 30
+
+# Constant Parameters For Building Tree
+CRITERION = "gini"
+IS_PRUNE  = True
+MAX_DEPTH = 10
+MAX_FEATURES = 70
+MIN_SAMPLES_LEAF = 1
+
+PRINT_TREE = False
+DEBUG      = False
+
+RANDOM_STATE = 1
+
+MECHS = ["no", "lap", "exp"]
+DISCS = [ True, False ]
+DCHAR = { True  : 'd', 
+          False : 'c' }
+
+BUDGETS = [ 0.01, 0.1, 0.5, 1., 3., 5., 7., 9.]
+
+# Variables
+N_FEATURE = 50
+N_SAMPLE  = 2000000 # 2.0M
+
+# XXX
+N_FEATURE = 14
+N_SAMPLES = 20000
 
 class DPRandomForestClassifier(ForestClassifier):
 
@@ -45,10 +88,10 @@ class DPRandomForestClassifier(ForestClassifier):
             base_estimator=base_estimator,
             n_estimators=n_estimators,
             estimator_params=(
-                            "diffprivacy_mech", "budget", "criterion", 
-                            "max_depth", "max_features", "min_samples_leaf", 
-                            "is_prune", "print_tree", "debug",
-                            "meta"),
+                "diffprivacy_mech", "budget", "criterion", 
+                "max_depth", "max_features", "min_samples_leaf", 
+                "is_prune", "print_tree", "debug",
+                "meta"),
             bootstrap=bootstrap,
             oob_score=oob_score,
             n_jobs=n_jobs,
@@ -141,34 +184,7 @@ def randomforest_test():
 
 randomforest_test()
 
-
-# constant
-# get data
-is_load_from_raw = False
-is_discretize = False
-dataset = "liantong"
-dmethod = "cluster"
-
-criterion = "gini"
-is_prune  = True
-max_depth = 10
-max_features = 70
-
-# Input and Output
-output_dir = "log/test_randomforest"
-
-# Variable
-n_features = [  50  ]          
-n_samples  = [ 1000000, # 1.0M ]
-
-budgets = [ 0.01, 0.1, 0.5, 1., 3., 5., 7., 9.]
-mechs = ["no", "lap", "exp"]
-discs = [ True, False ]
-
-def test(cp, dp, feature_importances, 
-         n_samples,
-         budget
-         ):
+def test(cp, dp, mech, disc):
 
     auc_str = StringIO()
     src_str = StringIO()
@@ -244,16 +260,14 @@ def main():
 
     cp = get_data(False, False)
     dp = get_data(False, True )
-    feature_importances = load_feature_importances()
 
     jobs = []
-    for s in n_samples:
-        for b in budgets:
+    for mech in MECHS:
+        for disc in DISCS:
+            if mech is "lap" and disc is False:
+                continue
             jobs.append( 
-                delayed(test)(cp, dp,
-                                feature_importances,
-                                s,
-                                budget = b) 
+                delayed(test)(cp, dp, mech, disc)
             )
 
     n_cores = 30
